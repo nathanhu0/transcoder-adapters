@@ -1,9 +1,17 @@
 torch==2.9.0
 transformers==4.57.1
+huggingface_hub>=0.20.0
 tqdm==4.67.1
 wandb==0.22.3
 pyyaml==6.0.3
 safetensors==0.6.2
 
-# For inference with models/qwen2_transcoder_vllm.py — see evalchemy repo for full eval setup
+# For inference with models/qwen2_transcoder_vllm.py commented out by default
 # vllm==0.11.0
+
+# For feature classification and auto-interp (analysis/features/)
+openai
+python-dotenv
+
+# For feature visualization with circuit-tracer frontend
+circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git@26a976e
