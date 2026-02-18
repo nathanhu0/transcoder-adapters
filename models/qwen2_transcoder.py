@@ -131,14 +131,14 @@ class Qwen2ForCausalLMWithTranscoder(Qwen2ForCausalLM):
         for layer in self.model.layers:
             layer.mlp.cache_features = enabled
 
-    def collect_sparsity_loss(self, l1_weight: float) -> torch.Tensor:
-        """Sum weighted L1 loss across all layers. Differentiable."""
+    def collect_sparsity_loss(self) -> torch.Tensor:
+        """Sum raw L1 loss across all layers. Differentiable. Caller applies l1_weight."""
         device = next(self.parameters()).device
         total = torch.tensor(0.0, device=device)
         for layer in self.model.layers:
             if layer.mlp.cached_l1 is not None:
                 total = total + layer.mlp.cached_l1.to(device)
-        return l1_weight * total
+        return total
 
     def collect_transcoder_stats(self) -> dict:
         """Collect L0 and dead feature stats across all layers for logging."""

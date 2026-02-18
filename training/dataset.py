@@ -8,6 +8,10 @@ import torch
 DEEPSEEK_USER_TOKEN = "<｜User｜>"
 DEEPSEEK_ASSISTANT_TOKEN = "<｜Assistant｜>"
 
+# Qwen/QwQ chat format tokens
+QWEN_IM_START = "<|im_start|>"
+QWEN_IM_END = "<|im_end|>"
+
 
 class OpenThoughtsDataset(Dataset):
     """Dataset for loading OpenThoughts reasoning traces.
@@ -68,11 +72,22 @@ class OpenThoughtsDataset(Dataset):
         self._load_data()
 
     def _load_data(self):
-        """Load filtered JSONL data."""
+        """Load filtered JSONL data from local path or HuggingFace (hf://repo/path)."""
         print(f"Loading data from {self.data_path}")
 
         all_examples = []
-        with open(self.data_path, 'r') as f:
+        if self.data_path.startswith("hf://"):
+            from huggingface_hub import hf_hub_download
+            # Parse hf://org/repo/path/to/file.jsonl
+            hf_path = self.data_path[len("hf://"):]
+            parts = hf_path.split("/", 2)  # org, repo, filepath
+            repo_id = f"{parts[0]}/{parts[1]}"
+            filepath = parts[2]
+            local_path = hf_hub_download(repo_id=repo_id, filename=filepath, repo_type="dataset")
+        else:
+            local_path = self.data_path
+
+        with open(local_path, 'r') as f:
             for line in f:
                 example = json.loads(line.strip())
                 all_examples.append(example)
@@ -109,6 +124,15 @@ class OpenThoughtsDataset(Dataset):
             input_ids = self.tokenizer.encode(text, add_special_tokens=True)
             # Prompt boundary: tokenize just the prompt portion
             prompt_text = f"{DEEPSEEK_USER_TOKEN}{prompt}{DEEPSEEK_ASSISTANT_TOKEN}"
+            prompt_len = len(self.tokenizer.encode(prompt_text, add_special_tokens=True))
+        elif self.format == "qwen":
+            # Explicit Qwen/QwQ format: <|im_start|>user\n...<|im_end|>\n<|im_start|>assistant\n...<|im_end|>
+            if response.startswith("<think> "):
+                response = "<think>\n" + response[len("<think> "):]
+            text = f"{QWEN_IM_START}user\n{prompt}{QWEN_IM_END}\n{QWEN_IM_START}assistant\n{response}{QWEN_IM_END}\n"
+            input_ids = self.tokenizer.encode(text, add_special_tokens=True)
+            # Prompt boundary
+            prompt_text = f"{QWEN_IM_START}user\n{prompt}{QWEN_IM_END}\n{QWEN_IM_START}assistant\n"
             prompt_len = len(self.tokenizer.encode(prompt_text, add_special_tokens=True))
         else:
             text = self.format_example(example)

@@ -1,0 +1,34 @@
+# Bridging transcoder config for QwQ-32B
+model_name: "Qwen/Qwen2.5-32B"
+run_name_prefix: "qwq_32b"
+
+transcoder:
+  n_features: 16384
+  dec_bias: true
+  l1_weight: 0.001
+
+bridging:
+  reference_model_path: "Qwen/QwQ-32B"
+  backbone: "target"
+  loss_type: "kl"
+  n_cutoffs: 1
+  sampling: "uniform"
+  always_include_adapt_only: true
+  lambda_bridge: 2.0
+  lambda_nmse: 1
+
+data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl"
+val_data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
+max_seq_length: 10000
+data_format: "qwen"
+truncate: true
+loss_on_prompt: true
+
+batch_size: 1
+micro_batch_size: 1
+learning_rate: 4e-4
+num_epochs: 1
+warmup_ratio: 0.05
+
+use_wandb: true
+save_checkpoints: true

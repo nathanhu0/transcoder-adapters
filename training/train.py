@@ -18,7 +18,7 @@ import wandb
 from functools import partial
 from typing import Dict
 
-from training.config import load_config, ExperimentConfig, BridgingConfig, _finalize_config
+from training.config import load_config, ExperimentConfig, BridgingConfig, DirectConfig, _finalize_config
 from training.dataset import OpenThoughtsDataset, collate_fn
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
@@ -36,8 +36,8 @@ def move_batch_to(device, batch):
     return out
 
 
-def setup_models(config: ExperimentConfig):
-    """Load transcoder model and frozen reference model.
+def setup_models_bridging(config: ExperimentConfig):
+    """Load transcoder model and frozen reference model (bridging mode).
 
     Model assembly:
       1. Load Qwen2ForCausalLMWithTranscoder via from_pretrained. This loads all
@@ -56,12 +56,8 @@ def setup_models(config: ExperimentConfig):
     backbone = getattr(bridging_config, 'backbone', 'base')
     tc_config = config.transcoder
 
-    # Load tokenizer — use reference model tokenizer for deepseek format
-    if config.data_format == 'deepseek' and bridging_config:
-        tokenizer_path = bridging_config.reference_model_path
-        print(f"Using reference model tokenizer for deepseek format: {tokenizer_path}")
-    else:
-        tokenizer_path = config.model_name
+    # Load tokenizer from reference model (the model we're distilling toward)
+    tokenizer_path = bridging_config.reference_model_path if bridging_config else config.model_name
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path, trust_remote_code=True, use_fast=True,
     )
@@ -147,6 +143,98 @@ def setup_models(config: ExperimentConfig):
     return model, ref_model, tokenizer
 
 
+def setup_models_direct(config: ExperimentConfig):
+    """Load base model with transcoders for direct fine-tuning (no reference model).
+
+    Adds special tokens (e.g. <think>, </think>) to the base tokenizer and copies
+    their embeddings from the reference model so they have meaningful representations
+    despite being frozen.
+    """
+    direct_config = config.direct
+    tc_config = config.transcoder
+
+    # Load base model tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model_name, trust_remote_code=True, use_fast=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Add special tokens that the base tokenizer doesn't have
+    if direct_config.copied_tokens:
+        num_added = tokenizer.add_special_tokens({
+            "additional_special_tokens": direct_config.copied_tokens,
+        })
+        print(f"Added {num_added} special tokens: {direct_config.copied_tokens}")
+
+    # Load base model with transcoders
+    hf_config = Qwen2ConfigWithTranscoder.from_pretrained(
+        config.model_name,
+        transcoder_n_features=tc_config.n_features,
+        transcoder_dec_bias=tc_config.dec_bias,
+    )
+    print(f"Loading base model: {config.model_name}")
+    model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
+        config.model_name,
+        config=hf_config,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+
+    # Resize embeddings for newly added tokens
+    if direct_config.copied_tokens:
+        model.resize_token_embeddings(len(tokenizer))
+
+        # Copy embeddings from reference model for the new tokens
+        print(f"Copying token embeddings from: {direct_config.reference_model_path}")
+        ref_model = AutoModelForCausalLM.from_pretrained(
+            direct_config.reference_model_path,
+            torch_dtype=torch.bfloat16,
+            device_map="cpu",
+            trust_remote_code=True,
+        )
+        ref_tokenizer = AutoTokenizer.from_pretrained(
+            direct_config.reference_model_path, trust_remote_code=True,
+        )
+
+        for token_str in direct_config.copied_tokens:
+            # Get token ID in each tokenizer
+            new_id = tokenizer.convert_tokens_to_ids(token_str)
+            ref_id = ref_tokenizer.convert_tokens_to_ids(token_str)
+            if ref_id == ref_tokenizer.unk_token_id:
+                print(f"  WARNING: '{token_str}' not found in reference tokenizer, skipping")
+                continue
+
+            # Copy embed_tokens
+            embed_device = model.model.embed_tokens.weight.device
+            model.model.embed_tokens.weight.data[new_id] = (
+                ref_model.model.embed_tokens.weight.data[ref_id].to(embed_device)
+            )
+            # Copy lm_head
+            head_device = model.lm_head.weight.device
+            model.lm_head.weight.data[new_id] = (
+                ref_model.lm_head.weight.data[ref_id].to(head_device)
+            )
+            print(f"  Copied '{token_str}': ref[{ref_id}] -> base[{new_id}]")
+
+        del ref_model, ref_tokenizer
+        print("Token embeddings copied")
+
+    # Re-initialize transcoder weights (same reason as bridging)
+    for layer in model.model.layers:
+        layer.mlp._init_transcoder_weights()
+
+    # Freeze everything except transcoder parameters
+    for name, param in model.named_parameters():
+        param.requires_grad = "transcoder" in name
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    print(f"Trainable: {n_trainable:,} params, Frozen: {n_frozen:,} params")
+
+    return model, None, tokenizer
+
+
 def setup_data(config: ExperimentConfig, tokenizer):
     """Setup dataset and dataloader."""
     print(f"Loading training dataset from: {config.data_path}")
@@ -220,7 +308,41 @@ def setup_training(config: ExperimentConfig, model, dataset):
     return optimizer, scheduler, total_steps, warmup_steps
 
 
-def train_step(
+def train_step_direct(
+    model,
+    batch: Dict,
+    config: ExperimentConfig,
+    gradient_accumulation_steps: int,
+) -> Dict[str, float]:
+    """Single training step for direct fine-tuning (LM loss + sparsity only)."""
+    input_ids = batch["input_ids"]
+    attention_mask = batch["attention_mask"]
+    labels = batch["labels"]
+    l1_weight = config.transcoder.l1_weight or 0.0
+
+    # Forward pass with feature caching (for L1 loss + stats)
+    model.set_cache_features(True)
+    logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+    model.set_cache_features(False)
+
+    # Losses
+    lm_loss = compute_lm_loss(logits, labels)
+    raw_sparsity = model.collect_sparsity_loss()
+    weighted_sparsity = l1_weight * raw_sparsity
+
+    # Backward
+    total_loss = (lm_loss + weighted_sparsity) / gradient_accumulation_steps
+    total_loss.backward()
+
+    metrics = {
+        "train/lm_loss": lm_loss.item(),
+        "train/sparsity": raw_sparsity.item(),
+        "train/total_loss": lm_loss.item() + weighted_sparsity.item(),
+    }
+    return metrics
+
+
+def train_step_bridging(
     model,
     ref_model,
     batch: Dict,
@@ -250,7 +372,8 @@ def train_step(
     model.set_cache_features(False)
 
     # Collect sparsity loss (sum of L1 across layers, must be while graph alive)
-    sparsity_loss = model.collect_sparsity_loss(l1_weight)
+    raw_sparsity = model.collect_sparsity_loss()
+    sparsity_loss = l1_weight * raw_sparsity
 
     # 2. Clean ref forward (for logits_ref if using KL loss)
     with torch.no_grad():
@@ -288,7 +411,7 @@ def train_step(
         scaled_first = first_loss / gradient_accumulation_steps
         scaled_first.backward()
 
-    metrics["sparsity/total"] = sparsity_loss.item() if torch.is_tensor(sparsity_loss) else sparsity_loss
+    metrics["train/sparsity"] = raw_sparsity.item()
 
     # Free logits_adapt to save memory
     del logits_adapt
@@ -362,6 +485,7 @@ def train_step(
         total_loss_value += bridging_config.lambda_bridge * metrics["bridging/bridge"]
 
     metrics["bridging/total"] = total_loss_value
+    metrics["train/total_loss"] = total_loss_value
 
     return metrics
 
@@ -398,14 +522,19 @@ def train_epoch(
         batch = move_batch_to(embed_device, batch)
 
         # Forward + backward (handled inside train_step for memory efficiency)
-        step_metrics = train_step(
-            model, ref_model, batch, config,
-            global_step, total_steps,
-            gradient_accumulation_steps
-        )
+        if config.direct:
+            step_metrics = train_step_direct(
+                model, batch, config, gradient_accumulation_steps
+            )
+        else:
+            step_metrics = train_step_bridging(
+                model, ref_model, batch, config,
+                global_step, total_steps,
+                gradient_accumulation_steps
+            )
 
         accumulation_step += 1
-        current_batch_losses.append(step_metrics.get("bridging/total", 0.0))
+        current_batch_losses.append(step_metrics.get("train/total_loss", 0.0))
         samples_seen += config.micro_batch_size
 
         # Accumulate metrics
@@ -473,26 +602,32 @@ def train_epoch(
 
             # Run validation
             if val_dataloader is not None and global_step % config.val_frequency == 0:
-                val_metrics = validate(model, ref_model, val_dataloader, config)
-                val_metrics["val/epoch"] = epoch
-                val_metrics["val/step"] = global_step
-                val_metrics["val/samples_seen"] = samples_seen
-                print(f"  Val total: {val_metrics['val/total_loss']:.4f}, LM: {val_metrics['val/language_modeling_loss']:.4f}, KL: {val_metrics['val/kl_to_ref']:.4f}")
+                if config.direct:
+                    val_metrics = validate_direct(model, val_dataloader, config)
+                    val_metrics["val/epoch"] = epoch
+                    val_metrics["val/step"] = global_step
+                    val_metrics["val/samples_seen"] = samples_seen
+                    print(f"  Val LM: {val_metrics['val/lm_loss']:.4f}")
+                else:
+                    val_metrics = validate_bridging(model, ref_model, val_dataloader, config)
+                    val_metrics["val/epoch"] = epoch
+                    val_metrics["val/step"] = global_step
+                    val_metrics["val/samples_seen"] = samples_seen
+                    print(f"  Val total: {val_metrics['val/total_loss']:.4f}, LM: {val_metrics['val/language_modeling_loss']:.4f}, KL: {val_metrics['val/kl_to_ref']:.4f}")
                 if config.use_wandb:
                     wandb.log(val_metrics, step=global_step)
 
-            # Run comprehensive layerwise validation
-            if val_dataloader is not None and global_step % config.layerwise_val_frequency == 0:
+            # Run comprehensive layerwise validation (bridging only)
+            if config.bridging and val_dataloader is not None and global_step % config.layerwise_val_frequency == 0:
                 print(f"  Running layerwise validation...")
                 layerwise_metrics = validate_layerwise(model, ref_model, val_dataloader, config)
                 if config.use_wandb:
                     wandb.log(layerwise_metrics, step=global_step)
 
-            # Save checkpoint every 10k steps
-            if global_step > 0 and global_step % 10000 == 0:
-                step_output_dir = f"{config.output_dir}/step_{global_step}"
+            # Save periodic checkpoint (overwrites previous latest)
+            if config.save_checkpoints and global_step > 0 and global_step % config.checkpoint_frequency == 0:
                 print(f"  Saving checkpoint at step {global_step}...")
-                save_checkpoint(model, tokenizer, step_output_dir)
+                save_latest_checkpoint(model, tokenizer, config.output_dir, global_step)
 
             # Debug mode early exit
             if config.debug_mode and global_step >= 50:
@@ -506,13 +641,47 @@ def train_epoch(
 
 
 @torch.no_grad()
-def validate(
+def validate_direct(
+    model,
+    val_dataloader,
+    config: ExperimentConfig,
+    max_samples: int = 100,
+) -> Dict[str, float]:
+    """Run validation for direct fine-tuning (LM loss + sparsity)."""
+    model.eval()
+    total_lm_loss = 0.0
+    total_sparsity = 0.0
+    num_samples = 0
+    embed_device = model.get_input_embeddings().weight.device
+
+    for batch in val_dataloader:
+        if num_samples >= max_samples:
+            break
+        batch = move_batch_to(embed_device, batch)
+        model.set_cache_features(True)
+        logits = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
+        model.set_cache_features(False)
+        total_sparsity += model.collect_sparsity_loss().item()
+        model.clear_cached_stats()
+        total_lm_loss += compute_lm_loss(logits, batch["labels"]).item()
+        num_samples += 1
+        del batch
+
+    model.train()
+    return {
+        "val/lm_loss": total_lm_loss / num_samples if num_samples > 0 else 0.0,
+        "val/sparsity": total_sparsity / num_samples if num_samples > 0 else 0.0,
+    }
+
+
+@torch.no_grad()
+def validate_bridging(
     model,
     ref_model,
     val_dataloader,
     config: ExperimentConfig,
 ) -> Dict[str, float]:
-    """Run validation on 100 samples."""
+    """Run validation on 100 samples (bridging mode)."""
     model.eval()
 
     total_lm_loss = 0.0
@@ -533,8 +702,14 @@ def validate(
         attention_mask = batch["attention_mask"]
         labels = batch["labels"]
 
-        # Forward both models (adapter-only, no bridging)
+        # Forward with feature caching for sparsity
+        model.set_cache_features(True)
         logits_adapt = model(input_ids=input_ids, attention_mask=attention_mask).logits
+        model.set_cache_features(False)
+        raw_sparsity = model.collect_sparsity_loss().item()
+        model.clear_cached_stats()
+        total_sparsity_loss += raw_sparsity
+
         logits_ref = ref_model(input_ids=input_ids, attention_mask=attention_mask).logits
 
         # Compute LM loss
@@ -545,16 +720,12 @@ def validate(
         kl_loss = compute_kl_loss(logits_adapt, logits_ref, labels)
         total_kl_loss += kl_loss.item()
 
-        # Sparsity loss not computed during validation (no feature caching)
-        sparsity_loss = 0.0
-        total_sparsity_loss += sparsity_loss
-
         # Total loss (using whatever loss_type is configured)
         if config.bridging.loss_type == "kl":
             task_loss = kl_loss.item()
         else:
             task_loss = lm_loss.item()
-        total_loss += task_loss + sparsity_loss
+        total_loss += task_loss
 
         num_samples += 1
         del batch
@@ -565,7 +736,7 @@ def validate(
         "val/total_loss": total_loss / num_samples if num_samples > 0 else 0.0,
         "val/language_modeling_loss": total_lm_loss / num_samples if num_samples > 0 else 0.0,
         "val/kl_to_ref": total_kl_loss / num_samples if num_samples > 0 else 0.0,
-        "val/sparsity_loss": total_sparsity_loss / num_samples if num_samples > 0 else 0.0,
+        "val/sparsity": total_sparsity_loss / num_samples if num_samples > 0 else 0.0,
     }
 
 
@@ -649,6 +820,17 @@ def save_checkpoint(model, tokenizer, output_dir):
     print(f"Checkpoint saved to {output_dir}")
 
 
+def save_latest_checkpoint(model, tokenizer, base_dir, step):
+    """Save checkpoint to base_dir/latest_step_N, removing any previous latest_step_* dir."""
+    import glob
+    import shutil
+    # Remove previous latest checkpoint
+    for old_dir in glob.glob(os.path.join(base_dir, "latest_step_*")):
+        shutil.rmtree(old_dir)
+    output_dir = os.path.join(base_dir, f"latest_step_{step}")
+    save_checkpoint(model, tokenizer, output_dir)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train with bridging loss")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
@@ -659,9 +841,11 @@ def main():
     # Load config
     config = load_config(args.config)
 
-    # Validate bridging config exists
-    if config.bridging is None:
-        raise ValueError("Bridging config not found in config file. Add a 'bridging:' section.")
+    # Validate exactly one training mode is set
+    has_bridging = config.bridging is not None
+    has_direct = config.direct is not None
+    if has_bridging == has_direct:
+        raise ValueError("Config must specify exactly one of 'bridging' or 'direct' section.")
 
     # Apply overrides
     config_changed = False
@@ -684,22 +868,33 @@ def main():
         print(f"Updated run name: {config.wandb_run_name}")
         print(f"Updated output dir: {config.output_dir}")
 
-    print(f"Starting bridging training")
-    print(f"  Base model: {config.model_name}")
-    print(f"  Reference model: {config.bridging.reference_model_path}")
-    print(f"  Loss type: {config.bridging.loss_type}")
-    print(f"  N cutoffs: {config.bridging.n_cutoffs}")
+    # Print mode-specific info
+    if config.direct:
+        print(f"Starting direct fine-tuning")
+        print(f"  Base model: {config.model_name}")
+        print(f"  Copied tokens: {config.direct.copied_tokens}")
+    else:
+        print(f"Starting bridging training")
+        print(f"  Base model: {config.model_name}")
+        print(f"  Reference model: {config.bridging.reference_model_path}")
+        print(f"  Loss type: {config.bridging.loss_type}")
+        print(f"  N cutoffs: {config.bridging.n_cutoffs}")
 
-    # Setup
-    model, ref_model, tokenizer = setup_models(config)
+    # Setup models
+    if config.direct:
+        model, ref_model, tokenizer = setup_models_direct(config)
+    else:
+        model, ref_model, tokenizer = setup_models_bridging(config)
+
     train_dataset, train_dataloader, val_dataloader = setup_data(config, tokenizer)
     optimizer, scheduler, total_steps, warmup_steps = setup_training(config, model, train_dataset)
 
     # WandB
     if config.use_wandb:
+        mode_prefix = "direct" if config.direct else "bridging"
         wandb.init(
             project=config.wandb_project,
-            name=f"bridging_{config.wandb_run_name}",
+            name=f"{mode_prefix}_{config.wandb_run_name}",
             config=config.__dict__
         )
 
@@ -720,13 +915,13 @@ def main():
             val_dataloader=val_dataloader,
         )
 
-        # Save checkpoint
-        epoch_output_dir = f"{config.output_dir}/epoch_{epoch+1}"
-        save_checkpoint(model, tokenizer, epoch_output_dir)
+        # Save checkpoint at end of epoch (overwrites previous latest)
+        if config.save_checkpoints:
+            save_latest_checkpoint(model, tokenizer, config.output_dir, current_step)
 
     print("Training complete!")
 
-    # Save final checkpoint
+    # Always save final checkpoint
     save_checkpoint(model, tokenizer, config.output_dir)
 
 
