@@ -1,0 +1,64 @@
+<｜begin▁of▁sentence｜><｜User｜>Problem: Find the sum of all integer bases $b > 9$ for which $17_b$ is a divisor of $97_b$.
+Mark your solution with \boxed{}
+Answer:<｜Assistant｜><think>
+Alright, so I have this problem: I need to find the sum of all integer bases \( b > 9 \) for which \( 17_b \) is a divisor of \( 97_b \). Hmm, okay. Let me try to break this down step by step.
+
+First off, I know that when a number is written in base \( b \), each digit represents a power of \( b \). So, for example, \( 17_b \) would be \( 1 \times b + 7 \times 1 = b + 7 \) in decimal. Similarly, \( 97_b \) would be \( 9 \times b + 7 \times 1 = 9b + 7 \) in decimal.
+
+So, the problem is essentially asking for all integer bases \( b > 9 \) such that \( (b + 7) \) divides \( (9b + 7) \). I need to find all such \( b \) and then sum them up.
+
+Let me write that down: Let \( d = b + 7 \). Then, \( 9b + 7 \) can be expressed in terms of \( d \). Let's see:
+
+\( d = b + 7 \) implies \( b = d - 7 \).
+
+Substituting back into \( 9b + 7 \):
+\( 9(d - 7) + 7 = 9d - 63 + 7 = 9d - 56 \).
+
+So, \( 9b + 7 = 9d - 56 \). Therefore, \( d \) must divide \( 9d - 56 \). In other words, \( d \) divides \( 9d - 56 \).
+
+But wait, \( d \) divides \( 9d - 56 \) means that \( d \) divides \( (9d - 56) - 9d = -56 \). So, \( d \) must be a divisor of 56. But since \( d = b + 7 \), and \( b > 9 \), then \( d > 16 \) because \( b > 9 \) implies \( d = b + 7 > 16 \).
+
+Therefore, \( d \) is a positive divisor of 56 that is greater than 16. Let me list all the positive divisors of 56:
+
+1, 2, 4, 7, 8, 14, 28, 56.
+
+Now, from these, which ones are greater than 16?
+
+Looking at the list: 14 is less than 16, so it's out. 28 and 56 are greater than 16. So, the possible values for \( d \) are 28 and 56.
+
+Therefore, \( d = 28 \) or \( d = 56 \).
+
+But \( d = b + 7 \), so solving for \( b \):
+
+1. If \( d = 28 \), then \( b = 28 - 7 = 21 \).
+2. If \( d = 56 \), then \( b = 56 - 7 = 49 \).
+
+So, the integer bases \( b \) are 21 and 49. Therefore, I need to sum these two values: 21 + 49.
+
+Calculating that: 21 + 49 is 70.
+
+Wait, hold on a second. Let me verify if these bases actually satisfy the original condition. Sometimes, even if the math suggests it, there could be an error in the logic.
+
+First, let's take \( b = 21 \).
+
+Compute \( 17_{21} \) and \( 97_{21} \):
+
+\( 17_{21} = 1 \times 21 + 7 = 28 \).
+
+\( 97_{21} = 9 \times 21 + 7 = 189 + 7 = 196 \).
+
+Now, does 28 divide 196? Yes, because 196 divided by 28 is 7, which is an integer. So that's correct.
+
+Now, let's check \( b = 49 \).
+
+Compute \( 17_{49} \) and \( 97_{49} \):
+
+\( 17_{49} = 1 \times 49 + 7 = 56 \).
+
+\( 97_{49} = 9 \times 49 + 7 = 441 + 7 = 448 \).
+
+Does 56 divide 448? Yes, because 448 divided by 56 is 8, which is an integer. So that's correct as well.
+
+Therefore, the two bases are 21 and 49, and their sum is 70.
+
+But

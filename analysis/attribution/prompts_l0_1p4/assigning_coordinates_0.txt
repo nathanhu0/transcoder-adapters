@@ -1,0 +1,20 @@
+<｜begin▁of▁sentence｜><｜User｜>Problem: On $\triangle ABC$, points $A$, $D$, $E$, and $B$ lie in that order on side $\overline{AB}$ with $AD = 4$, $DE = 16$, and $EB = 8$. Points $A$, $F$, $G$, and $C$ lie in that order on side $\overline{AC}$ with $AF = 13$, $FG = 52$, and $GC = 26$. Let $M$ be the reflection of $D$ through $F$, and let $N$ be the reflection of $G$ through $E$. Quadrilateral $DEGF$ has area 288. Find the area of heptagon $AFNBCEM$.
+Mark your solution with \boxed{}
+Answer:<｜Assistant｜><think>
+Alright, so I have this geometry problem here about a triangle ABC with various points on its sides and some reflections involved. The goal is to find the area of a heptagon, which is a seven-sided polygon, AFNBCEM. Alright, let me try to break this down step by step.
+
+First, let me visualize the triangle. We have points A, D, E, B on side AB, and points A, F, G, C on side AC. The lengths given are AD = 4, DE = 16, EB = 8 on AB, and AF = 13, FG = 52, GC = 26 on AC. Then, M is the reflection of D through F, and N is the reflection of G through E. The quadrilateral DEGF has an area of 288, which I need to use to find the area of the heptagon AFNBCEM.
+
+Hmm. Let me start by understanding the given points and their positions.
+
+On side AB: A, D, E, B. So from A to D is 4 units, D to E is 16, E to B is 8. Therefore, the total length of AB is AD + DE + EB = 4 + 16 + 8 = 28 units.
+
+On side AC: A, F, G, C. So from A to F is 13 units, F to G is 52 units, G to C is 26 units. Thus, the total length of AC is AF + FG + GC = 13 + 52 + 26 = 91 units.
+
+So, AB is 28 units and AC is 91 units. Now, points D and E are on AB, and points F and G are on AC.
+
+Now, M is the reflection of D through F, and N is the reflection of G through E. So reflection implies that F is the midpoint between D and M, and E is the midpoint between G and N. So, essentially, the segments DM and FG are equal and in opposite directions, but since D and M are reflections, the distance from F to D should be equal to the distance from F to M, but on the opposite side.
+
+Similarly, for N, since N is the reflection of G through E, then E should be the midpoint of G and N. So, the distance from E to G is 52, so E to N should also be 52, but in the opposite direction.
+
+So, first, let me find the coordinates

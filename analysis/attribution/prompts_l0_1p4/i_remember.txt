@@ -1,0 +1,6 @@
+<｜begin▁of▁sentence｜><｜User｜>Problem: In a table tennis tournament every participant played every other participant exactly once. Although there were twice as many right-handed players as left-handed players, the number of games won by left-handed players was $40\%$ more than the number of games won by right-handed players. (There were no ties and no ambidextrous players.) What is the total number of games played?
+Mark your solution with \boxed{}
+Answer:<｜Assistant｜><think>
+Alright, let's tackle this table tennis tournament problem. It sounds a bit tricky at first, but I'll break it down step by step.
+
+So, the problem says that in a table tennis tournament, every participant played every other participant exactly once. That means this is a round-robin tournament where each player faces every other player once. I remember
