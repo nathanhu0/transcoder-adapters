@@ -1,0 +1,3 @@
+#do not commit
+
+python -m analysis.attribution.run_attribution --checkpoint nathu0/transcoder-adapters-R1-Distill-Qwen-7B-l1w0.001-l0-1.4 --run_name test_migration --scan nathu0/transcoder-adapters-R1-Distill-Qwen-7B-l1w0.001-l0-1.4 --prompts /nlp/u/nathu/transcoder_adapters/analysis/attribution/prompts_l0_1p4/wait_typo_2.txt --output_dir /nlp/scr/nathu/test_attribution --batch_size 1 --edge_threshold 0.6 --node_threshold 0.4 --max_feature_nodes 50 --max_n_logits 3
