@@ -150,7 +150,7 @@ def compute_nmse_loss(
     causal_mask_mapping = {
         "full_attention": create_causal_mask(**mask_kwargs),  # type: ignore
     }
-    if hasattr(model.model, 'has_sliding_layers') and model.model.has_sliding_layers:
+    if any(getattr(layer, 'attention_type', None) == 'sliding_attention' for layer in model.model.layers):
         causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)  # type: ignore
 
     # Position embeddings

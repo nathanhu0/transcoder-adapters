@@ -50,7 +50,7 @@ def forward_mixed(
     causal_mask_mapping = {
         "full_attention": create_causal_mask(**mask_kwargs), # type: ignore
     }
-    if hasattr(model1.model, 'has_sliding_layers') and model1.model.has_sliding_layers:
+    if any(getattr(layer, 'attention_type', None) == 'sliding_attention' for layer in model1.model.layers):
         causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs) # type: ignore
 
     # Position embeddings from model1

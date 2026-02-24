@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from transformers import Gemma2Config, Gemma2ForCausalLM
 from transformers.models.gemma2.modeling_gemma2 import Gemma2MLP
 
+# Gemma 2 MLP layer source code: https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma2/modeling_gemma2.py#L69C1-L83C1
 
 class Gemma2ConfigWithTranscoder(Gemma2Config):
     """Gemma2 config with transcoder parameters."""
