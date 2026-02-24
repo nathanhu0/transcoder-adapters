@@ -66,6 +66,8 @@ def forward_mixed(
             position_embeddings=position_embeddings,
             cache_position=cache_position,
         )
+        if isinstance(h, tuple):
+            h = h[0]
 
     # Model2 layers: switch_layer to L
     # Need model2's position embeddings for its layers
@@ -79,6 +81,8 @@ def forward_mixed(
             position_embeddings=position_embeddings_2,
             cache_position=cache_position,
         )
+        if isinstance(h, tuple):
+            h = h[0]
 
     # Final norm + lm_head from model2
     h = model2.model.norm(h)

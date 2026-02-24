@@ -174,6 +174,8 @@ def compute_nmse_loss(
             position_embeddings=position_embeddings_adapt,
             cache_position=cache_position,
         )
+        if isinstance(h_adapt, tuple):
+            h_adapt = h_adapt[0]
 
         with torch.no_grad():
             h_ref = layer_ref(
@@ -183,6 +185,8 @@ def compute_nmse_loss(
                 position_embeddings=position_embeddings_ref,
                 cache_position=cache_position,
             )
+            if isinstance(h_ref, tuple):
+                h_ref = h_ref[0]
 
         # Accumulate NMSE (move to consistent device for multi-GPU)
         layer_nmse_i = _layer_nmse(h_adapt, h_ref.detach())
