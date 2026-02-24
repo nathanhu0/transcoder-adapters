@@ -1,0 +1,35 @@
+#!/bin/bash
+#SBATCH --account=nlp
+#SBATCH --gres=gpu:1
+#SBATCH --constraint=48G
+#SBATCH --mem=128G
+#SBATCH --partition=jag-hi
+#SBATCH --job-name=r1_distil_1.5b_debug
+#SBATCH --output=logs/%j.out
+#SBATCH --error=logs/%j.err
+
+# ── Usage ────────────────────────────────────────────────────────────
+#   sbatch slurm_run_debug.sh
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Logs & Outputs ──────────────────────────────────────────────────
+#
+# SLURM stdout/stderr:
+#   logs/<job_id>.out   and   logs/<job_id>.err
+#   (created in the repo root; the directory must exist before submission)
+#
+#   To find your job ID after submitting:
+#     squeue -u $USER
+#
+#   To tail logs of a running job:
+#     tail -f logs/<job_id>.out
+#
+# Training checkpoints & wandb artifacts:
+#   Written to the output directory configured in the YAML config
+#   (defaults are printed at the start of training in stdout).
+# ─────────────────────────────────────────────────────────────────────
+
+mkdir -p logs
+
+python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
+
