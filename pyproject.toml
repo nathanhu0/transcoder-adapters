@@ -1,0 +1,33 @@
+[project]
+name = "transcoder-adapters"
+version = "0.1.0"
+description = "Sparse transcoder adapters for bridging distillation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "torch>=2.9",
+    "transformers>=4.56",
+    "huggingface-hub>=0.20",
+    "safetensors>=0.6",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "wandb>=0.19",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+]
+viz = [
+    "circuit-tracer @ git+https://github.com/safety-research/circuit-tracer.git@fad653f78861b10963044d642b10b103b5ee3081",
+]
+vllm = [
+    "vllm>=0.8",
+]
+
+all = [
+    "transcoder-adapters[analysis,viz,vllm]",
+]
+
