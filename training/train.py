@@ -21,7 +21,7 @@ from training.config import load_config, ExperimentConfig, _finalize_config
 from training.dataset import OpenThoughtsDataset, collate_fn
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
-from models.qwen2_transcoder import Qwen2ForCausalLMWithTranscoder, Qwen2ConfigWithTranscoder
+from models import get_transcoder_classes
 
 
 def move_batch_to(device, batch):
@@ -57,6 +57,9 @@ def setup_models_bridging(config: ExperimentConfig):
     tc_config = config.transcoder
     assert tc_config is not None
 
+    assert config.model_arch is not None, "model_arch must be set (auto-detected or explicit)"
+    ConfigWithTranscoder, ModelWithTranscoder = get_transcoder_classes(config.model_arch)
+
     # Load tokenizer from reference model (the model we're distilling toward)
     tokenizer_path = bridging_config.reference_model_path if bridging_config else config.model_name
     tokenizer = AutoTokenizer.from_pretrained(
@@ -65,21 +68,21 @@ def setup_models_bridging(config: ExperimentConfig):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Both models are Qwen2 7B architecture — config is identical
-    hf_config = Qwen2ConfigWithTranscoder.from_pretrained(
+    # Build HF config with transcoder params
+    hf_config = ConfigWithTranscoder.from_pretrained(
         config.model_name,
         transcoder_n_features=tc_config.n_features,
         transcoder_dec_bias=tc_config.dec_bias,
     )
 
-    # Load transcoder model. from_pretrained loads standard Qwen2 weights from the
+    # Load transcoder model. from_pretrained loads standard weights from the
     # checkpoint; transcoder_enc/dec are not in the checkpoint and stay at __init__
     # values (dec=zeros → zero initial contribution).
     if backbone == "target":
         # Target backbone: load reference model (attn/embed/layernorm from reference),
         # then swap in base model's MLP weights. Result: reference attn + base MLP + fresh transcoder.
         print(f"Loading reference model as backbone: {bridging_config.reference_model_path}")
-        model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
+        model = ModelWithTranscoder.from_pretrained(
             bridging_config.reference_model_path,
             config=hf_config,
             torch_dtype=torch.bfloat16,
@@ -93,7 +96,7 @@ def setup_models_bridging(config: ExperimentConfig):
             device_map="cpu",
             trust_remote_code=True,
         )
-        for adapter_mlp, base_layer in zip(model._transcoder_mlps(), base_model.model.layers):
+        for adapter_mlp, base_layer in zip(model._transcoder_mlps(), base_model.model.layers): # pyright: ignore[reportCallIssue]
             base_mlp = base_layer.mlp  # type: ignore[union-attr]
             device = adapter_mlp.gate_proj.weight.device
             adapter_mlp.gate_proj.weight.data.copy_(base_mlp.gate_proj.weight.data.to(device))
@@ -104,7 +107,7 @@ def setup_models_bridging(config: ExperimentConfig):
     else:
         # Base backbone: all non-transcoder weights from base model directly.
         print(f"Loading base model: {config.model_name}")
-        model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
+        model = ModelWithTranscoder.from_pretrained(
             config.model_name,
             config=hf_config,
             torch_dtype=torch.bfloat16,
@@ -116,7 +119,7 @@ def setup_models_bridging(config: ExperimentConfig):
     # meta tensors first, so our __init__ zero-initialization of dec is overwritten by
     # HF's default _init_weights (normal distribution). This restores dec=zeros for
     # zero initial transcoder contribution.
-    for mlp in model._transcoder_mlps():
+    for mlp in model._transcoder_mlps(): # pyright: ignore[reportCallIssue]
         mlp._init_transcoder_weights()
 
     # Freeze everything except transcoder parameters
@@ -154,6 +157,9 @@ def setup_models_direct(config: ExperimentConfig):
     tc_config = config.transcoder
     assert tc_config is not None
 
+    assert config.model_arch is not None, "model_arch must be set (auto-detected or explicit)"
+    ConfigWithTranscoder, ModelWithTranscoder = get_transcoder_classes(config.model_arch)
+
     # Load base model tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         config.model_name, trust_remote_code=True, use_fast=True,
@@ -169,13 +175,13 @@ def setup_models_direct(config: ExperimentConfig):
         print(f"Added {num_added} special tokens: {direct_config.copied_tokens}")
 
     # Load base model with transcoders
-    hf_config = Qwen2ConfigWithTranscoder.from_pretrained(
+    hf_config = ConfigWithTranscoder.from_pretrained(
         config.model_name,
         transcoder_n_features=tc_config.n_features,
         transcoder_dec_bias=tc_config.dec_bias,
     )
     print(f"Loading base model: {config.model_name}")
-    model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
+    model = ModelWithTranscoder.from_pretrained(
         config.model_name,
         config=hf_config,
         torch_dtype=torch.bfloat16,
@@ -223,7 +229,7 @@ def setup_models_direct(config: ExperimentConfig):
         print("Token embeddings copied")
 
     # Re-initialize transcoder weights (same reason as bridging)
-    for mlp in model._transcoder_mlps():
+    for mlp in model._transcoder_mlps(): # pyright: ignore[reportCallIssue]
         mlp._init_transcoder_weights()
 
     # Freeze everything except transcoder parameters

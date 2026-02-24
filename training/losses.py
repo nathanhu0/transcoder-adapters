@@ -123,7 +123,7 @@ def compute_nmse_loss(
         If return_layerwise=False: Scalar NMSE loss averaged over all layers
         If return_layerwise=True: (scalar_loss, dict of layer -> nmse_value)
     """
-    from transformers.masking_utils import create_causal_mask
+    from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
 
     n_layers = len(model.model.layers)
     device = model.get_input_embeddings().weight.device
@@ -138,7 +138,7 @@ def compute_nmse_loss(
     cache_position = torch.arange(seq_len, device=device)
     position_ids = cache_position.unsqueeze(0)
 
-    # Create causal mask
+    # Create causal masks (full + sliding window if needed)
     mask_kwargs = {
         "config": model.config,
         "input_embeds": h_adapt,
@@ -147,7 +147,11 @@ def compute_nmse_loss(
         "past_key_values": None,
         "position_ids": position_ids,
     }
-    causal_mask = create_causal_mask(**mask_kwargs) # type: ignore
+    causal_mask_mapping = {
+        "full_attention": create_causal_mask(**mask_kwargs),  # type: ignore
+    }
+    if hasattr(model.model, 'has_sliding_layers') and model.model.has_sliding_layers:
+        causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)  # type: ignore
 
     # Position embeddings
     position_embeddings_adapt = model.model.rotary_emb(h_adapt, position_ids)
@@ -161,7 +165,7 @@ def compute_nmse_loss(
 
     # Layer by layer
     for i, (layer_adapt, layer_ref) in enumerate(zip(model.model.layers, ref_model.model.layers)):
-        layer_mask = causal_mask  # Assumes full attention for all layers
+        layer_mask = causal_mask_mapping[layer_adapt.attention_type]
 
         h_adapt = layer_adapt(
             h_adapt,

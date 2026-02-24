@@ -44,6 +44,7 @@ class ExperimentConfig:
 
     # Model settings
     model_name: str = "Qwen/Qwen2.5-Math-7B"
+    model_arch: str | None = None  # "qwen2", "gemma2", etc. Auto-detected from model_name if None
 
     # Transcoder configuration
     transcoder: TranscoderConfig | None = None
@@ -122,6 +123,11 @@ def load_config(config_path: str) -> ExperimentConfig:
             config.transcoder.l1_weight = float(config.transcoder.l1_weight)
         if config.transcoder.pre_activation_loss_weight is not None:
             config.transcoder.pre_activation_loss_weight = float(config.transcoder.pre_activation_loss_weight)
+
+    # Resolve model_arch from model_name if not set
+    if config.model_arch is None:
+        from models import detect_architecture
+        config.model_arch = detect_architecture(config.model_name)
 
     # Auto-compute run name and output dir if not specified
     config = _finalize_config(config)
