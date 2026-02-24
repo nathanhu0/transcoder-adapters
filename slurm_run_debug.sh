@@ -16,10 +16,10 @@
 #
 # SLURM stdout/stderr:
 #   logs/<job_id>.out   and   logs/<job_id>.err
-#   (created in the repo root; the directory must exist before submission)
+#   (location from repo root)
 #
 #   To find your job ID after submitting:
-#     squeue -u $USER
+#     squeue --me
 #
 #   To tail logs of a running job:
 #     tail -f logs/<job_id>.out
@@ -31,5 +31,12 @@
 
 mkdir -p logs
 
-python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
+echo "[Slurm] Setting up (uv sync)..."
 
+uv sync
+
+echo "[Slurm] Running Python..."
+
+uv run python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
+
+echo "[Slurm] Job finished!"
