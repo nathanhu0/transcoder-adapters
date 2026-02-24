@@ -84,6 +84,13 @@ def forward_mixed(
     h = model2.model.norm(h)
     logits = model2.lm_head(h)
 
+    # Gemma2 applies tanh softcapping to final logits inside its forward(),
+    # but we bypass forward() here. Replicate it so bridging logits are on
+    # the same scale as reference logits (which go through the full forward).
+    cap = getattr(model2.config, 'final_logit_softcapping', None)
+    if cap:
+        logits = torch.tanh(logits / cap) * cap
+
     return logits
 
 
