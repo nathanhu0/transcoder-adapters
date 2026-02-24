@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from collections.abc import Iterator
 from transformers import Gemma2Config, Gemma2ForCausalLM
 from transformers.models.gemma2.modeling_gemma2 import Gemma2MLP
 
@@ -77,7 +78,7 @@ class Gemma2MLPWithTranscoder(Gemma2MLP):
         if self.dec_bias:
             nn.init.zeros_(self.transcoder_dec.bias)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states):  # type: ignore[override]
         """Forward pass with original MLP + transcoder branch."""
         # Original MLP computation (from parent class)
         original_output = super().forward(hidden_states)
@@ -126,18 +127,23 @@ class Gemma2ForCausalLMWithTranscoder(Gemma2ForCausalLM):
         for layer in self.model.layers:
             layer.mlp = Gemma2MLPWithTranscoder(config)
 
+    def _transcoder_mlps(self) -> Iterator[Gemma2MLPWithTranscoder]:
+        """Yield each transcoder MLP layer with proper typing."""
+        for layer in self.model.layers:
+            yield layer.mlp  # type: ignore[misc]
+
     def set_cache_features(self, enabled: bool):
         """Toggle feature caching on all transcoder layers."""
-        for layer in self.model.layers:
-            layer.mlp.cache_features = enabled
+        for mlp in self._transcoder_mlps():
+            mlp.cache_features = enabled
 
     def collect_sparsity_loss(self) -> torch.Tensor:
         """Sum raw L1 loss across all layers. Differentiable. Caller applies l1_weight."""
         device = next(self.parameters()).device
         total = torch.tensor(0.0, device=device)
-        for layer in self.model.layers:
-            if layer.mlp.cached_l1 is not None:
-                total = total + layer.mlp.cached_l1.to(device)
+        for mlp in self._transcoder_mlps():
+            if mlp.cached_l1 is not None:
+                total = total + mlp.cached_l1.to(device)
         return total
 
     def collect_transcoder_stats(self) -> dict:
@@ -146,8 +152,7 @@ class Gemma2ForCausalLMWithTranscoder(Gemma2ForCausalLM):
         l0_values = []
         dead_100_total = 0
         dead_1000_total = 0
-        for i, layer in enumerate(self.model.layers):
-            mlp = layer.mlp
+        for i, mlp in enumerate(self._transcoder_mlps()):
             if mlp.cached_l0 is not None:
                 l0_values.append(mlp.cached_l0)
                 stats[f"adapter_stats_per_layer/layer_{i}_l0_count"] = mlp.cached_l0
@@ -166,9 +171,9 @@ class Gemma2ForCausalLMWithTranscoder(Gemma2ForCausalLM):
 
     def clear_cached_stats(self):
         """Clear per-step caches (L1/L0). Dead feature counters are persistent."""
-        for layer in self.model.layers:
-            layer.mlp.cached_l1 = None
-            layer.mlp.cached_l0 = None
+        for mlp in self._transcoder_mlps():
+            mlp.cached_l1 = None
+            mlp.cached_l0 = None
 
 
 def register_gemma2_transcoder():

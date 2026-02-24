@@ -233,12 +233,14 @@ def main():
             continue
 
         print(f"\n[{i}/{len(prompt_items)}] {slug}")
-        print(f"  Last 60 chars: ...{data['text'][-60:]!r}")
+        prompt_text: str = data['text']  # type: ignore[assignment]
+        prompt_tokens: list[int] = data["tokens"]  # type: ignore[assignment]
+        print(f"  Last 60 chars: ...{prompt_text[-60:]!r}")
         print(f"  Target: {model.tokenizer.decode([data['target']])!r}")
 
         try:
             graph = run_attribution_for_prompt(
-                prompt_tokens=data["tokens"],
+                prompt_tokens=prompt_tokens,
                 slug=slug,
                 model=model,
                 scan=args.scan,

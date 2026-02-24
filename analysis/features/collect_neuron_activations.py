@@ -24,7 +24,7 @@ import json
 import random
 import heapq
 from collections import defaultdict
-from typing import Optional
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
 import torch
@@ -140,7 +140,7 @@ class NeuronCollector:
         neuron_idx: int,
         domain: str,
         region: str,
-        thinking_position: Optional[float],
+        thinking_position: float | None,
         sequence_idx: int,
     ):
         """Add example to top-k heap if it qualifies."""
@@ -207,8 +207,9 @@ class NeuronCollector:
         self.tokens_per_domain[domain] += seq_len
         for pos in range(seq_len):
             self.tokens_per_region[regions[pos]] += 1
-            if thinking_positions[pos] is not None:
-                bin_idx = min(9, int(thinking_positions[pos] * 10))
+            think_pos_val = thinking_positions[pos]
+            if think_pos_val is not None:
+                bin_idx = min(9, int(think_pos_val * 10))
                 self.tokens_per_thinking_bin[bin_idx] += 1
 
         # Process each layer using topk (much faster than iterating all activations)
@@ -388,7 +389,7 @@ def export_metadata_neurons(collector: NeuronCollector, output_dir: Path):
     """Export metadata for neurons."""
     print("Exporting metadata...")
 
-    metadata = {
+    metadata: dict[str, Any] = {
         "total_tokens": collector.total_tokens,
         "tokens_per_domain": dict(collector.tokens_per_domain),
         "tokens_per_region": dict(collector.tokens_per_region),

@@ -16,9 +16,8 @@ from tqdm import tqdm
 import argparse
 import wandb
 from functools import partial
-from typing import Dict
 
-from training.config import load_config, ExperimentConfig, BridgingConfig, DirectConfig, _finalize_config
+from training.config import load_config, ExperimentConfig, _finalize_config
 from training.dataset import OpenThoughtsDataset, collate_fn
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
@@ -53,8 +52,10 @@ def setup_models_bridging(config: ExperimentConfig):
          transcoder weights) as a single checkpoint — no conversion step needed.
     """
     bridging_config = config.bridging
+    assert bridging_config is not None
     backbone = getattr(bridging_config, 'backbone', 'base')
     tc_config = config.transcoder
+    assert tc_config is not None
 
     # Load tokenizer from reference model (the model we're distilling toward)
     tokenizer_path = bridging_config.reference_model_path if bridging_config else config.model_name
@@ -92,14 +93,12 @@ def setup_models_bridging(config: ExperimentConfig):
             device_map="cpu",
             trust_remote_code=True,
         )
-        for i in range(len(model.model.layers)):
-            device = model.model.layers[i].mlp.gate_proj.weight.device
-            model.model.layers[i].mlp.gate_proj.weight.data.copy_(
-                base_model.model.layers[i].mlp.gate_proj.weight.data.to(device))
-            model.model.layers[i].mlp.up_proj.weight.data.copy_(
-                base_model.model.layers[i].mlp.up_proj.weight.data.to(device))
-            model.model.layers[i].mlp.down_proj.weight.data.copy_(
-                base_model.model.layers[i].mlp.down_proj.weight.data.to(device))
+        for adapter_mlp, base_layer in zip(model._transcoder_mlps(), base_model.model.layers):
+            base_mlp = base_layer.mlp  # type: ignore[union-attr]
+            device = adapter_mlp.gate_proj.weight.device
+            adapter_mlp.gate_proj.weight.data.copy_(base_mlp.gate_proj.weight.data.to(device))
+            adapter_mlp.up_proj.weight.data.copy_(base_mlp.up_proj.weight.data.to(device))
+            adapter_mlp.down_proj.weight.data.copy_(base_mlp.down_proj.weight.data.to(device))
         del base_model
         print("MLP weights swapped")
     else:
@@ -117,8 +116,8 @@ def setup_models_bridging(config: ExperimentConfig):
     # meta tensors first, so our __init__ zero-initialization of dec is overwritten by
     # HF's default _init_weights (normal distribution). This restores dec=zeros for
     # zero initial transcoder contribution.
-    for layer in model.model.layers:
-        layer.mlp._init_transcoder_weights()
+    for mlp in model._transcoder_mlps():
+        mlp._init_transcoder_weights()
 
     # Freeze everything except transcoder parameters
     for name, param in model.named_parameters():
@@ -151,7 +150,9 @@ def setup_models_direct(config: ExperimentConfig):
     despite being frozen.
     """
     direct_config = config.direct
+    assert direct_config is not None
     tc_config = config.transcoder
+    assert tc_config is not None
 
     # Load base model tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -222,8 +223,8 @@ def setup_models_direct(config: ExperimentConfig):
         print("Token embeddings copied")
 
     # Re-initialize transcoder weights (same reason as bridging)
-    for layer in model.model.layers:
-        layer.mlp._init_transcoder_weights()
+    for mlp in model._transcoder_mlps():
+        mlp._init_transcoder_weights()
 
     # Freeze everything except transcoder parameters
     for name, param in model.named_parameters():
@@ -310,11 +311,12 @@ def setup_training(config: ExperimentConfig, model, dataset):
 
 def train_step_direct(
     model,
-    batch: Dict,
+    batch: dict,
     config: ExperimentConfig,
     gradient_accumulation_steps: int,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Single training step for direct fine-tuning (LM loss + sparsity only)."""
+    assert config.transcoder is not None
     input_ids = batch["input_ids"]
     attention_mask = batch["attention_mask"]
     labels = batch["labels"]
@@ -345,12 +347,12 @@ def train_step_direct(
 def train_step_bridging(
     model,
     ref_model,
-    batch: Dict,
+    batch: dict,
     config: ExperimentConfig,
     global_step: int,
     total_steps: int,
     gradient_accumulation_steps: int,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Single training step with bridging loss using memory-efficient forward_mixed.
 
     This function handles its own backward() calls to free computation graphs
@@ -648,7 +650,7 @@ def validate_direct(
     val_dataloader,
     config: ExperimentConfig,
     max_samples: int = 100,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Run validation for direct fine-tuning (LM loss + sparsity)."""
     model.eval()
     total_lm_loss = 0.0
@@ -682,8 +684,9 @@ def validate_bridging(
     ref_model,
     val_dataloader,
     config: ExperimentConfig,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Run validation on 100 samples (bridging mode)."""
+    assert config.bridging is not None
     model.eval()
 
     total_lm_loss = 0.0
@@ -749,7 +752,7 @@ def validate_layerwise(
     val_dataloader,
     config: ExperimentConfig,
     max_samples: int = 25,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute comprehensive layer-wise bridging and NMSE metrics on a small sample."""
     model.eval()
 
@@ -792,6 +795,7 @@ def validate_layerwise(
 
         # NMSE by layer
         _, nmse_layerwise = compute_nmse_loss(model, ref_model, input_ids, attention_mask, return_layerwise=True)
+        assert isinstance(nmse_layerwise, dict)
         for layer_idx, val in nmse_layerwise.items():
             nmse_by_layer[layer_idx] += val
 
@@ -876,6 +880,7 @@ def main():
         print(f"  Base model: {config.model_name}")
         print(f"  Copied tokens: {config.direct.copied_tokens}")
     else:
+        assert config.bridging is not None
         print(f"Starting bridging training")
         print(f"  Base model: {config.model_name}")
         print(f"  Reference model: {config.bridging.reference_model_path}")

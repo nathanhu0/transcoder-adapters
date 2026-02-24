@@ -22,6 +22,7 @@ import gzip
 import json
 import os
 import struct
+from typing import Any
 from tqdm import tqdm
 
 
@@ -66,7 +67,7 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    index = {"version": "1.0", "format": "variable_chunks"}
+    index: dict[str, Any] = {"version": "1.0", "format": "variable_chunks"}
 
     total_found = 0
     total_possible = args.n_layers * args.n_features

@@ -9,7 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Optional, Any
+from collections.abc import Iterable
+from typing import Any
 
 from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM as VLLMQwen2ForCausalLM, Qwen2MLP
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
@@ -24,7 +25,7 @@ class Qwen2MLPWithTranscoder(Qwen2MLP):
         hidden_size: int,
         intermediate_size: int,
         hidden_act: str,
-        quant_config: Optional[Any] = None,
+        quant_config: Any | None = None,
         prefix: str = "",
         transcoder_n_features: int = 512,
         transcoder_dec_bias: bool = False,

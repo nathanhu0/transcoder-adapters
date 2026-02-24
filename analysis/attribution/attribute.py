@@ -31,7 +31,7 @@ def compute_salient_logits(
         desired_logit_prob: Cumulative probability threshold *p*.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
             * logit_indices - ``(k,)`` vocabulary ids.
             * logit_probs   - ``(k,)`` softmax probabilities.
             * demeaned_vecs - ``(k, d_model)`` unembedding columns, demeaned.

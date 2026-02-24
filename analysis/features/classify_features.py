@@ -39,7 +39,7 @@ import asyncio
 import random
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Literal
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -91,27 +91,27 @@ class FeatureClassification:
     confidence: Literal["high", "medium", "low"]
 
     # Level 2a: Mechanism (for reasoning features only)
-    mechanism: Optional[Literal["output", "input_simple", "input_abstract"]]
+    mechanism: Literal["output", "input_simple", "input_abstract"] | None
 
     # Level 2b: Domain type (for domain features only)
-    domain_type: Optional[Literal["math", "science", "code"]]
+    domain_type: Literal["math", "science", "code"] | None
 
     # Descriptions
     category_description: str  # Brief explanation of why this category
-    mechanism_description: Optional[str]  # For reasoning: explanation of the mechanism
+    mechanism_description: str | None  # For reasoning: explanation of the mechanism
 
     # What triggers it (for input_simple or input_abstract)
-    input_pattern: Optional[str]  # e.g., "fires on 'wait'" or "fires at contradiction points"
+    input_pattern: str | None  # e.g., "fires on 'wait'" or "fires at contradiction points"
 
     # What it promotes (especially for output mechanism)
-    output_pattern: Optional[str]  # e.g., "promotes 'Wait'", "promotes hesitation words"
+    output_pattern: str | None  # e.g., "promotes 'Wait'", "promotes hesitation words"
 
     # Raw LLM output
     llm_reasoning: str
 
     # Metadata
     n_examples: int
-    activation_freq: Optional[float]
+    activation_freq: float | None
     top_logits: list[str]
 
 
@@ -270,7 +270,7 @@ def load_metadata(input_dir: Path) -> dict:
         return json.load(f)
 
 
-def load_feature_json(input_dir: Path, cantor_id: int) -> Optional[dict]:
+def load_feature_json(input_dir: Path, cantor_id: int) -> dict | None:
     """Load a single feature JSON file."""
     path = input_dir / "features" / f"{cantor_id}.json"
     if not path.exists():
@@ -347,7 +347,7 @@ async def classify_feature(
     feature_json: dict,
     model: str = "gpt-4o-mini",
     n_examples: int = 10,
-) -> Optional[FeatureClassification]:
+) -> FeatureClassification | None:
     """Classify a single feature using LLM."""
 
     examples = get_top_examples(feature_json, n_examples)

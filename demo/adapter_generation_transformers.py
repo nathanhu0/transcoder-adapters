@@ -30,8 +30,11 @@ print(tokenizer.decode(output[0][inputs.input_ids.shape[1]:], skip_special_token
 print("--------------------------------------\n\n")
 
 #%% Generate with adapters OFF (hybrid: base mlp, reasoning elsewhere)
+from models.qwen2_transcoder import Qwen2MLPWithTranscoder
 for layer in model.model.layers:
-    layer.mlp.disable_transcoder = True
+    mlp = layer.mlp
+    assert isinstance(mlp, Qwen2MLPWithTranscoder)
+    mlp.disable_transcoder = True
 
 output = model.generate(**inputs, max_new_tokens=500, do_sample=True, temperature=0.7)
 

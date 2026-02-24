@@ -27,7 +27,7 @@ import random
 import heapq
 from dataclasses import dataclass, field
 from collections import defaultdict
-from typing import Optional
+from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
 import torch
@@ -55,7 +55,7 @@ class ActivatingExample:
     # Metadata
     domain: str
     region: str  # bos, user_marker, question, assistant_marker, think_start, thinking, think_end, answer
-    thinking_position: Optional[float]  # 0-1 if in thinking region, else None
+    thinking_position: float | None  # 0-1 if in thinking region, else None
     sequence_idx: int
 
     def __lt__(self, other):
@@ -114,7 +114,7 @@ def find_token_positions(tokens: list[int], tokenizer) -> dict:
     """Find positions of special tokens in a sequence."""
     special_ids = get_special_token_ids(tokenizer)
 
-    positions = {
+    positions: dict[str, int | None] = {
         'bos': None,
         'user_marker': None,
         'assistant_marker': None,
@@ -138,7 +138,7 @@ def find_token_positions(tokens: list[int], tokenizer) -> dict:
     return positions
 
 
-def classify_position(position: int, markers: dict) -> tuple[str, Optional[float]]:
+def classify_position(position: int, markers: dict) -> tuple[str, float | None]:
     """
     Classify which region a token position belongs to.
 
@@ -187,7 +187,7 @@ def classify_position(position: int, markers: dict) -> tuple[str, Optional[float
     return 'unknown', None
 
 
-def precompute_regions(tokens: list[int], markers: dict) -> tuple[list[str], list[Optional[float]]]:
+def precompute_regions(tokens: list[int], markers: dict) -> tuple[list[str], list[float | None]]:
     """Precompute region classification for all positions in a sequence."""
     regions = []
     thinking_positions = []
@@ -276,7 +276,7 @@ class FeatureCollector:
         feature_idx: int,
         domain: str,
         region: str,
-        thinking_position: Optional[float],
+        thinking_position: float | None,
         sequence_idx: int,
     ):
         """Add example to top-k heap and/or random reservoir if appropriate."""
@@ -361,8 +361,9 @@ class FeatureCollector:
         self.tokens_per_domain[domain] += seq_len
         for pos in range(seq_len):
             self.tokens_per_region[regions[pos]] += 1
-            if thinking_positions[pos] is not None:
-                bin_idx = min(9, int(thinking_positions[pos] * 10))
+            think_pos_val = thinking_positions[pos]
+            if think_pos_val is not None:
+                bin_idx = min(9, int(think_pos_val * 10))
                 self.tokens_per_thinking_bin[bin_idx] += 1
 
         # Process each layer
@@ -553,7 +554,7 @@ def export_metadata(collector: FeatureCollector, output_dir: Path):
     """Export rich metadata to JSON for analysis."""
     print("Exporting metadata...")
 
-    metadata = {
+    metadata: dict[str, Any] = {
         # Global counts
         "total_tokens": collector.total_tokens,
         "tokens_per_domain": dict(collector.tokens_per_domain),
@@ -672,7 +673,8 @@ def main():
     model.eval()
 
     n_layers = len(model.model.layers)
-    n_features = model.model.layers[0].mlp.n_features
+    first_mlp = next(model._transcoder_mlps())
+    n_features = first_mlp.n_features
     print(f"Model: {n_layers} layers, {n_features} features per layer")
 
     # Load dataset

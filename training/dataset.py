@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from typing import Dict, List, Any, Optional, Literal
+from typing import Any, Literal
 import json
 import torch
 
@@ -108,7 +108,7 @@ class OpenThoughtsDataset(Dataset):
         """Return the number of examples."""
         return len(self.examples)
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         """Get a single example."""
         example = self.examples[idx]
         conversations = example['conversations']
@@ -168,7 +168,7 @@ class OpenThoughtsDataset(Dataset):
             "original_length": original_length,
         }
 
-    def format_example(self, example: Dict[str, Any]) -> str:
+    def format_example(self, example: dict[str, Any]) -> str:
         """Format a single example into the training format.
 
         Args:

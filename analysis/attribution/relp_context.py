@@ -8,7 +8,6 @@ Key difference from standard context:
 """
 
 from typing import TYPE_CHECKING
-from functools import partial
 
 import torch
 from einops import einsum
@@ -55,7 +54,7 @@ class RelPAttributionContext:
         self._row_size = self.n_features + self.n_tokens
 
         # Cache for residual activations (filled during forward)
-        self._resid_cache: dict[int, torch.Tensor] = {}
+        self._resid_cache: dict[int | str, torch.Tensor] = {}
 
         # Batch buffer for accumulating edge weights
         self._batch_buffer: torch.Tensor | None = None
@@ -209,6 +208,7 @@ class RelPAttributionContext:
         self._collect_token_grads(batch_size)
 
         # Return transposed buffer
+        assert self._batch_buffer is not None
         result = self._batch_buffer.T[:batch_size].clone()
         self._batch_buffer = None
 
@@ -216,6 +216,7 @@ class RelPAttributionContext:
 
     def _collect_feature_grads(self, batch_size: int):
         """Collect gradients from cached features into batch buffer."""
+        assert self._batch_buffer is not None
         if self.n_features == 0:
             return
 
@@ -241,6 +242,7 @@ class RelPAttributionContext:
 
     def _collect_token_grads(self, batch_size: int):
         """Collect embedding gradients for token contributions."""
+        assert self._batch_buffer is not None
         embed_resid = self._resid_cache.get('embed')
         if embed_resid is None or embed_resid.grad is None:
             return

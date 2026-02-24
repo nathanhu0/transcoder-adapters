@@ -2,13 +2,12 @@
 
 import torch
 import torch.nn.functional as F
-from typing import Optional
 
 
 def compute_kl_loss(
     logits: torch.Tensor,
     ref_logits: torch.Tensor,
-    labels: Optional[torch.Tensor] = None,
+    labels: torch.Tensor | None = None,
     ignore_index: int = -100,
 ) -> torch.Tensor:
     """

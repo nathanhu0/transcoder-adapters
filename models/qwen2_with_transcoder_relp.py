@@ -5,22 +5,18 @@ Load the same weights as Qwen2ForCausalLMWithTranscoder but with modified
 backward passes that implement Relevance Propagation rules.
 """
 
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Set
+from collections.abc import Iterator
 
 from transformers import Qwen2Config
 from transformers.models.qwen2.modeling_qwen2 import (
-    Qwen2PreTrainedModel,
     Qwen2RotaryEmbedding,
-    Qwen2DecoderLayer,
     apply_rotary_pos_emb,
     repeat_kv,
 )
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from transformers.cache_utils import DynamicCache
 
 
 
@@ -72,16 +68,16 @@ class Qwen2MLPWithTranscoderRelP(nn.Module):
 
         # RelP settings (set on model, propagated here)
         self.relp_enabled = True
-        self.stop_grad_at: Set[str] = set()
+        self.stop_grad_at: set[str] = set()
 
         # Optional: disable transcoder entirely
         self.disable_transcoder = False
 
         # Cached activations for attribution (populated during forward)
-        self.cached_features: Optional[torch.Tensor] = None
+        self.cached_features: torch.Tensor | None = None
 
         # Feature mask for ablation: [n_features], 1=keep, 0=suppress
-        self.feature_mask: Optional[torch.Tensor] = None
+        self.feature_mask: torch.Tensor | None = None
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # === Base MLP ===
@@ -156,7 +152,7 @@ class Qwen2AttentionRelP(nn.Module):
 
         # RelP settings
         self.relp_enabled = True
-        self.stop_grad_at: Set[str] = set()
+        self.stop_grad_at: set[str] = set()
 
         # Memory-efficient chunked attention (default on)
         self.use_chunked_attention = True
@@ -222,7 +218,7 @@ class Qwen2AttentionRelP(nn.Module):
         query_states: torch.Tensor,
         key_states: torch.Tensor,
         value_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor],
+        attention_mask: torch.Tensor | None,
     ) -> tuple:
         """Original full attention (for debugging/comparison)."""
         # Compute attention scores
@@ -246,7 +242,7 @@ class Qwen2AttentionRelP(nn.Module):
         self,
         hidden_states: torch.Tensor,
         position_embeddings: tuple,
-        attention_mask: Optional[torch.Tensor] = None,
+        attention_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> tuple:
         bsz, seq_len, _ = hidden_states.shape
@@ -293,13 +289,14 @@ class Qwen2DecoderLayerRelP(nn.Module):
         self.post_attention_layernorm = Qwen2RMSNormRelP(config.hidden_size, eps=config.rms_norm_eps)
 
         # For compatibility with mask selection
-        self.attention_type = config.layer_types[layer_idx] if hasattr(config, 'layer_types') else "full_attention"
+        layer_types = getattr(config, 'layer_types', None)
+        self.attention_type = layer_types[layer_idx] if layer_types is not None else "full_attention"
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_embeddings: Optional[tuple] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_embeddings: tuple | None = None,
         **kwargs,
     ) -> torch.Tensor:
         # Self attention
@@ -341,13 +338,14 @@ class Qwen2ModelRelP(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
         **kwargs,
     ) -> BaseModelOutputWithPast:
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
+            assert inputs_embeds is not None
 
         hidden_states = inputs_embeds
         seq_len = hidden_states.shape[1]
@@ -396,28 +394,33 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
 
         # RelP settings
         self.relp_enabled = True
-        self.stop_grad_at: Set[str] = set()
+        self.stop_grad_at: set[str] = set()
 
     def set_relp_enabled(self, enabled: bool):
         """Enable/disable RelP rules globally."""
         self.relp_enabled = enabled
         self._propagate_relp_settings()
 
-    def set_stop_grad_at(self, points: Set[str]):
+    def set_stop_grad_at(self, points: set[str]):
         """Set which points should have gradients stopped."""
         self.stop_grad_at = points
         self._propagate_relp_settings()
 
+    def _decoder_layers(self) -> Iterator[Qwen2DecoderLayerRelP]:
+        """Yield each decoder layer with proper typing."""
+        for layer in self.model.layers:
+            yield layer  # type: ignore[misc]
+
     def _propagate_relp_settings(self):
         """Propagate RelP settings to all submodules."""
-        for layer in self.model.layers:
+        for layer in self._decoder_layers():
             layer.input_layernorm.relp_enabled = self.relp_enabled
             layer.post_attention_layernorm.relp_enabled = self.relp_enabled
             layer.self_attn.relp_enabled = self.relp_enabled
             layer.self_attn.stop_grad_at = self.stop_grad_at
             layer.mlp.relp_enabled = self.relp_enabled
             layer.mlp.stop_grad_at = self.stop_grad_at
-        self.model.norm.relp_enabled = self.relp_enabled
+        self.model.norm.relp_enabled = self.relp_enabled  # type: ignore[union-attr]
 
     def set_chunked_attention(self, enabled: bool, chunk_size: int = 512):
         """Enable/disable memory-efficient chunked attention.
@@ -427,18 +430,18 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
                      If False, use full attention (O(seq^2) memory).
             chunk_size: Size of query chunks (default 512).
         """
-        for layer in self.model.layers:
+        for layer in self._decoder_layers():
             layer.self_attn.use_chunked_attention = enabled
             layer.self_attn.attention_chunk_size = chunk_size
 
-    def set_feature_mask(self, mask: Optional[torch.Tensor]):
+    def set_feature_mask(self, mask: torch.Tensor | None):
         """Set feature mask for ablation studies.
 
         Args:
             mask: Shape [n_layers, n_features], 1=keep, 0=suppress.
                   Pass None to clear all masks.
         """
-        for i, layer in enumerate(self.model.layers):
+        for i, layer in enumerate(self._decoder_layers()):
             layer.mlp.feature_mask = mask[i] if mask is not None else None
 
     def get_cached_features(self) -> dict:
@@ -449,7 +452,7 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
         """
         return {
             i: layer.mlp.cached_features
-            for i, layer in enumerate(self.model.layers)
+            for i, layer in enumerate(self._decoder_layers())
             if layer.mlp.cached_features is not None
         }
 
@@ -462,7 +465,7 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
             Dict mapping layer_idx -> attribution tensor [batch, seq, n_features]
         """
         attrs = {}
-        for i, layer in enumerate(self.model.layers):
+        for i, layer in enumerate(self._decoder_layers()):
             f = layer.mlp.cached_features
             if f is not None and f.grad is not None:
                 attrs[i] = f * f.grad
@@ -479,8 +482,8 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> CausalLMOutputWithPast:
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
@@ -505,6 +508,7 @@ class Qwen2ForCausalLMWithTranscoderRelP(nn.Module):
 
         # Load config
         config = AutoConfig.from_pretrained(path, trust_remote_code=True)
+        assert isinstance(config, Qwen2Config)
 
         # Create model
         model = cls(config)

@@ -2,7 +2,6 @@
 
 import torch
 import random
-from typing import List, Union
 
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
 
@@ -91,8 +90,8 @@ def forward_mixed(
 def sample_cutoffs(
     n_layers: int,
     n_cutoffs: int,
-    sampling: Union[str, List[int]] = "uniform",
-) -> List[int]:
+    sampling: str | list[int] = "uniform",
+) -> list[int]:
     """
     Sample layer cutoff indices without replacement.
 

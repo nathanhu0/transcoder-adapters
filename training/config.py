@@ -2,7 +2,7 @@
 
 import yaml
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Literal, Any
 from pathlib import Path
 
 
@@ -11,7 +11,7 @@ class TranscoderConfig:
     """Transcoder adapter configuration."""
     n_features: int = 8192
     dec_bias: bool = True  # Whether to include bias in decoder
-    l1_weight: Optional[float] = 0.001  # Weight for L1 regularization on features
+    l1_weight: float | None = 0.001  # Weight for L1 regularization on features
     normalize_by_layer: bool = False  # Whether to normalize L1 weights by layer output norm
     schedule_l1_weight: bool = False  # Whether to linearly ramp L1 weight from 0 to target weight
     pre_activation_loss_weight: float = 0.0  # Weight for pre-activation loss (prevents dead features)
@@ -35,7 +35,7 @@ class BridgingConfig:
 class DirectConfig:
     """Direct fine-tuning configuration (no bridging, LM loss only on response tokens)."""
     reference_model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"  # Source for copied token embeddings
-    copied_tokens: List[str] = field(default_factory=lambda: ["<think>", "</think>"])  # Tokens to add and copy from reference
+    copied_tokens: list[str] = field(default_factory=lambda: ["<think>", "</think>"])  # Tokens to add and copy from reference
 
 
 @dataclass
@@ -46,11 +46,11 @@ class ExperimentConfig:
     model_name: str = "Qwen/Qwen2.5-Math-7B"
 
     # Transcoder configuration
-    transcoder: Optional[TranscoderConfig] = None
+    transcoder: TranscoderConfig | None = None
 
     # Training mode (exactly one of bridging or direct must be set)
-    bridging: Optional[BridgingConfig] = None
-    direct: Optional[DirectConfig] = None
+    bridging: BridgingConfig | None = None
+    direct: DirectConfig | None = None
 
     # Training hyperparameters
     learning_rate: float = 8e-4
@@ -64,8 +64,8 @@ class ExperimentConfig:
     # Data settings
     max_seq_length: int = 10000
     data_path: str = "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl"
-    val_data_path: Optional[str] = "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
-    data_format: str = "deepseek"
+    val_data_path: str | None = "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
+    data_format: Literal["tokenizer", "deepseek"] = "deepseek"
     truncate: bool = True
     loss_on_prompt: bool = True
 
@@ -73,9 +73,9 @@ class ExperimentConfig:
     layerwise_val_frequency: int = 2000  # Run layerwise validation every N steps
 
     # Output settings (auto-computed)
-    output_dir: Optional[str] = None  # Will be computed from hyperparameters
-    wandb_run_name: Optional[str] = None  # Will be computed from hyperparams
-    run_name_prefix: Optional[str] = None  # Optional prefix for run name (e.g., "r1_distil_yolo")
+    output_dir: str | None = None  # Will be computed from hyperparameters
+    wandb_run_name: str | None = None  # Will be computed from hyperparams
+    run_name_prefix: str | None = None  # Optional prefix for run name (e.g., "r1_distil_yolo")
 
     # WandB settings
     use_wandb: bool = True
@@ -190,7 +190,7 @@ def _extract_model_size(model_name: str) -> str:
     return "unknown"
 
 
-def apply_overrides(config: ExperimentConfig, overrides: Dict[str, Any]) -> ExperimentConfig:
+def apply_overrides(config: ExperimentConfig, overrides: dict[str, Any]) -> ExperimentConfig:
     """Apply command line overrides to config.
 
     Supports:

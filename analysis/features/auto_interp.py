@@ -26,7 +26,6 @@ import asyncio
 import random
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -50,13 +49,13 @@ class FeatureResult:
     description: str
     reasoning: str
     # Detection on top activating examples
-    detection_top_accuracy: Optional[float]
-    detection_top_precision: Optional[float]
-    detection_top_recall: Optional[float]
+    detection_top_accuracy: float | None
+    detection_top_precision: float | None
+    detection_top_recall: float | None
     # Detection on random samples
-    detection_random_accuracy: Optional[float]
-    detection_random_precision: Optional[float]
-    detection_random_recall: Optional[float]
+    detection_random_accuracy: float | None
+    detection_random_precision: float | None
+    detection_random_recall: float | None
     # Metadata
     n_examples: int
     activation_freq: float
@@ -153,7 +152,7 @@ def load_metadata(input_dir: Path) -> dict:
         return json.load(f)
 
 
-def load_feature_json(input_dir: Path, cantor_id: int) -> Optional[dict]:
+def load_feature_json(input_dir: Path, cantor_id: int) -> dict | None:
     """Load a single feature JSON file."""
     path = input_dir / "features" / f"{cantor_id}.json"
     if not path.exists():
@@ -261,7 +260,7 @@ async def run_detection_task(
     negatives: list[str],
     rng: random.Random,
     model: str,
-) -> tuple[Optional[float], Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None, float | None]:
     """Run a single detection task, return (accuracy, precision, recall)."""
     detect_items = []
     for ex in positives:
@@ -291,7 +290,9 @@ async def run_detection_task(
             max_tokens=200,
             response_format={"type": "json_object"},
         )
-        predictions = json.loads(detect_response.choices[0].message.content)
+        content = detect_response.choices[0].message.content
+        assert content is not None
+        predictions = json.loads(content)
         return compute_detection_metrics(predictions, detect_items)
     except Exception as e:
         return None, None, None
@@ -306,7 +307,7 @@ async def process_feature(
     model: str = "gpt-4o-mini",
     n_description: int = 10,
     n_detection: int = 5,
-) -> Optional[FeatureResult]:
+) -> FeatureResult | None:
     """Process a single feature: generate description + two detection evaluations."""
 
     # Get examples by quantile
@@ -349,7 +350,9 @@ async def process_feature(
             max_tokens=500,
             response_format={"type": "json_object"},
         )
-        desc_result = json.loads(desc_response.choices[0].message.content)
+        content = desc_response.choices[0].message.content
+        assert content is not None
+        desc_result = json.loads(content)
         description = desc_result.get("description", "")
         reasoning = desc_result.get("reasoning", "")
     except Exception as e:

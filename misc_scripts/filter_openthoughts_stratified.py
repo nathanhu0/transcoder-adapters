@@ -109,8 +109,9 @@ def stream_and_collect_by_domain(
     # Load streaming dataset
     print("Loading dataset (streaming)...")
     dataset = load_dataset("open-thoughts/OpenThoughts3-1.2M", streaming=True)
-    print(f"Dataset has {dataset['train'].n_shards} shards")
-    shuffled = dataset['train'].shuffle(seed=seed, buffer_size=buffer_size)
+    train_split = dataset['train']  # type: ignore[index]
+    print(f"Dataset has {train_split.n_shards} shards")  # type: ignore[union-attr]
+    shuffled = train_split.shuffle(seed=seed, buffer_size=buffer_size)  # type: ignore[union-attr]
 
     # Collectors per domain: {domain: {'short': [], 'long': []}}
     collected = {d: {'short': [], 'long': []} for d in DOMAIN_RATIOS.keys()}

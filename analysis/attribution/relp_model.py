@@ -7,11 +7,14 @@ for linearized backward passes.
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 from transformers import AutoTokenizer
 
+if TYPE_CHECKING:
+    from torch import device
 
 @dataclass
 class RelPModelConfig:
@@ -65,7 +68,7 @@ class RelPReplacementModel(nn.Module):
         cls,
         checkpoint_path: str,
         device: torch.device | str | None = None,
-        device_map: str | dict | None = None,
+        device_map: str | dict[str, str | int | device] | None = None,
         dtype: torch.dtype = torch.bfloat16,
     ) -> "RelPReplacementModel":
         """Load a RelPReplacementModel from a local path or HF repo ID.
@@ -94,7 +97,7 @@ class RelPReplacementModel(nn.Module):
                 )
                 print(f"Auto device_map: {device_map}")
 
-            model = dispatch_model(model, device_map=device_map)
+            model = dispatch_model(model, device_map=device_map) # pyright: ignore[reportArgumentType]
         else:
             # Single GPU
             if device is None:
