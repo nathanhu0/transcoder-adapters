@@ -49,10 +49,10 @@ def forward_mixed(
         "position_ids": position_ids,
     }
     causal_mask_mapping = {
-        "full_attention": create_causal_mask(**mask_kwargs),
+        "full_attention": create_causal_mask(**mask_kwargs), # type: ignore
     }
     if hasattr(model1.model, 'has_sliding_layers') and model1.model.has_sliding_layers:
-        causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)
+        causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs) # type: ignore
 
     # Position embeddings from model1
     position_embeddings = model1.model.rotary_emb(h, position_ids)

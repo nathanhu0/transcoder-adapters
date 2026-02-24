@@ -91,9 +91,9 @@ class ExperimentConfig:
 
 def load_config(config_path: str) -> ExperimentConfig:
     """Load configuration from YAML file."""
-    config_path = Path(config_path)
+    config_path = Path(config_path) # type: ignore
 
-    if not config_path.exists():
+    if not config_path.exists(): # type: ignore
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with open(config_path, 'r') as f:

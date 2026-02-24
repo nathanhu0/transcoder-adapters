@@ -148,7 +148,7 @@ def compute_nmse_loss(
         "past_key_values": None,
         "position_ids": position_ids,
     }
-    causal_mask = create_causal_mask(**mask_kwargs)
+    causal_mask = create_causal_mask(**mask_kwargs) # type: ignore
 
     # Position embeddings
     position_embeddings_adapt = model.model.rotary_emb(h_adapt, position_ids)
@@ -185,6 +185,7 @@ def compute_nmse_loss(
         layer_nmse_i = _layer_nmse(h_adapt, h_ref.detach())
         nmse_total = nmse_total + layer_nmse_i.to(device)
         if return_layerwise:
+            assert layerwise is not None
             layerwise[i + 1] = layer_nmse_i.item()
 
     # Average over all layers (embeddings + n_layers)

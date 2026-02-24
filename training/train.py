@@ -363,6 +363,8 @@ def train_step_bridging(
     attention_mask = batch["attention_mask"]
     labels = batch["labels"]
     bridging_config = config.bridging
+    assert bridging_config is not None
+    assert config.transcoder is not None
     n_layers = len(model.model.layers)
     l1_weight = config.transcoder.l1_weight or 0.0
 
@@ -426,7 +428,7 @@ def train_step_bridging(
         metrics["bridging/nmse"] = nmse_loss.item()
         total_loss_value += bridging_config.lambda_nmse * nmse_loss.item()
         # Log per-layer NMSE
-        for layer_idx, nmse_val in nmse_layerwise.items():
+        for layer_idx, nmse_val in nmse_layerwise.items(): # type: ignore
             metrics[f"bridging_layerwise/nmse_layer_{layer_idx}"] = nmse_val
         del nmse_loss
 
