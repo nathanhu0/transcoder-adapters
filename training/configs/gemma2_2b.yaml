@@ -1,7 +1,7 @@
-# Debug config for Gemma2 2B with transcoder adapters
+# Bridging transcoder config for Gemma2 2B
 model_name: "google/gemma-2-2b"
 model_arch: "gemma2"
-run_name_prefix: "gemma2_2b_debug"
+run_name_prefix: "gemma2_2b"
 
 transcoder:
   n_features: 8192
@@ -31,5 +31,4 @@ learning_rate: 8e-4
 num_epochs: 1
 warmup_ratio: 0.05
 
-use_wandb: false
-debug_mode: true
+use_wandb: true

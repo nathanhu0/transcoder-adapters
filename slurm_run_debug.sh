@@ -37,6 +37,8 @@ uv sync
 
 echo "[Slurm] Running Python..."
 
-uv run python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
+# uv run python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
+uv run python -m training.train --config training/configs/r1_distil_1.5b.yaml --debug_mode
+# uv run python -m training.train --config training/configs/r1_distil_1.5b.yaml
 
 echo "[Slurm] Job finished!"

@@ -76,7 +76,7 @@ class ExperimentConfig:
     # Output settings (auto-computed)
     output_dir: str | None = None  # Will be computed from hyperparameters
     wandb_run_name: str | None = None  # Will be computed from hyperparams
-    run_name_prefix: str | None = None  # Optional prefix for run name (e.g., "r1_distil_yolo")
+    run_name_prefix: str | None = None  # Optional prefix for run name (e.g., "r1_distil_yolo") for use in wandb and the output dir.
 
     # WandB settings
     use_wandb: bool = True
@@ -139,7 +139,7 @@ def _finalize_config(config: ExperimentConfig) -> ExperimentConfig:
 
     # Build run name from hyperparameters
     if config.wandb_run_name is None:
-        run_parts = []
+        run_parts: list[str] = []
 
         # Use prefix if provided, otherwise generate default prefix
         if config.run_name_prefix:

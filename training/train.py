@@ -23,6 +23,7 @@ from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
 from models import get_transcoder_classes
 
+DEBUG_MODE_EARLY_EXIT_STEPS = 50
 
 def move_batch_to(device, batch):
     """Move batch tensors to device."""
@@ -640,7 +641,7 @@ def train_epoch(
                 save_latest_checkpoint(model, tokenizer, config.output_dir, global_step)
 
             # Debug mode early exit
-            if config.debug_mode and global_step >= 50:
+            if config.debug_mode and global_step >= DEBUG_MODE_EARLY_EXIT_STEPS:
                 print(f"Debug mode: Breaking after {global_step} steps")
                 break
 
@@ -848,6 +849,7 @@ def main():
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--learning_rate", "-lr", type=float, help="Override learning rate")
     parser.add_argument("--l1_weight", type=float, help="Override L1 weight")
+    parser.add_argument("--debug_mode", nargs="?", const="true", default=None, help="Override debug_mode (--debug_mode, --debug_mode=true, --debug_mode=false). If activating debug mode through this setting, wandb will be disabled.")
     args = parser.parse_args()
 
     # Load config
@@ -871,6 +873,20 @@ def main():
         config.transcoder.l1_weight = args.l1_weight
         print(f"Override L1 weight: {args.l1_weight}")
         config_changed = True
+
+    if args.debug_mode is not None:
+        if args.debug_mode.lower() == "true":
+            config.debug_mode = True
+            config.use_wandb = False
+            print("Using debug mode through flag: wandb disabled")
+            if config.run_name_prefix and not config.run_name_prefix.endswith("_debug"):
+                config.run_name_prefix += "_debug"
+                print(f"Using debug mode through flag: added _debug to run_name_prefix, now '{config.run_name_prefix}'")
+        elif args.debug_mode.lower() == "false":
+            config.debug_mode = False
+        else:
+            parser.error(f"Invalid value for --debug_mode: '{args.debug_mode}'. Must be 'true' or 'false'.")
+        print(f"Override debug_mode: {config.debug_mode}")
 
     if config_changed:
         # Update run name and output dir to reflect the overrides
