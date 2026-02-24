@@ -9,7 +9,8 @@
 #SBATCH --error=logs/%j.err
 
 # ── Usage ────────────────────────────────────────────────────────────
-#   sbatch slurm_run_debug.sh
+#   Run ./slurm_batch. Or you can do `sbatch slurm_run_debug.sh`, but
+#   will need to set up env variables yourself in that case.
 # ─────────────────────────────────────────────────────────────────────
 
 # ── Logs & Outputs ──────────────────────────────────────────────────
@@ -38,7 +39,7 @@ uv sync
 echo "[Slurm] Running Python..."
 
 # uv run python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
-uv run python -m training.train --config training/configs/r1_distil_1.5b.yaml --debug_mode
-# uv run python -m training.train --config training/configs/r1_distil_1.5b.yaml
+uv run python -m training.train --config training/configs/gemma2_2b.yaml --debug_mode
+# uv run python -m training.train --config training/configs/gemma2_2b.yaml
 
 echo "[Slurm] Job finished!"
