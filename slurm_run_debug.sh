@@ -5,6 +5,7 @@
 #SBATCH --mem=128G
 #SBATCH --partition=jag-hi
 #SBATCH --job-name=gemma2_2b
+#SBATCH --time=14-00:00:00
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
 
