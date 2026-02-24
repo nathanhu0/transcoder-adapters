@@ -4,7 +4,7 @@
 #SBATCH --constraint=48G
 #SBATCH --mem=128G
 #SBATCH --partition=jag-hi
-#SBATCH --job-name=r1_distil_1.5b_debug
+#SBATCH --job-name=gemma2_2b
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
 
@@ -39,7 +39,7 @@ uv sync
 echo "[Slurm] Running Python..."
 
 # uv run python -m training.train --config training/configs/r1_distil_1.5b_debug.yaml
-uv run python -m training.train --config training/configs/gemma2_2b.yaml --debug_mode
+uv run python -m training.train --config training/configs/gemma2_2b.yaml
 # uv run python -m training.train --config training/configs/gemma2_2b.yaml
 
 echo "[Slurm] Job finished!"
