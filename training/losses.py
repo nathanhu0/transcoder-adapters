@@ -39,22 +39,34 @@ def compute_kl_loss(
     logits_flat = shift_logits.view(-1, shift_logits.size(-1))
     ref_logits_flat = shift_ref_logits.view(-1, shift_ref_logits.size(-1))
 
-    # Compute log probs and probs
-    log_probs = F.log_softmax(logits_flat, dim=-1)
-    ref_probs = F.softmax(ref_logits_flat, dim=-1)
-
-    # KL divergence: sum over vocab, mean over tokens
-    kl = F.kl_div(log_probs, ref_probs, reduction='none').sum(dim=-1)
-
-    # Mask out padding if labels provided (use shifted labels)
+    # Prepare mask before chunked loop
+    mask = None
     if labels is not None:
         shift_labels = labels[..., 1:].contiguous()
         mask = (shift_labels.view(-1) != ignore_index).float()
-        kl = (kl * mask).sum() / mask.sum().clamp(min=1)
-    else:
-        kl = kl.mean()
 
-    return kl
+    # Chunked KL computation to avoid materializing full [tokens, vocab] tensors.
+    # With vocab_size=256k and seq_len=10k, each full tensor is ~5GB in bf16;
+    # computing log_softmax + softmax + kl_div simultaneously requires ~15GB.
+    # Chunking keeps only ~0.75GB alive at a time.
+    num_tokens = logits_flat.size(0)
+    chunk_size = 512
+    kl_sum = torch.tensor(0.0, device=logits_flat.device)
+
+    for i in range(0, num_tokens, chunk_size):
+        end = min(i + chunk_size, num_tokens)
+        log_probs = F.log_softmax(logits_flat[i:end], dim=-1)
+        log_ref_probs = F.log_softmax(ref_logits_flat[i:end], dim=-1)
+        kl_chunk = F.kl_div(log_probs, log_ref_probs, reduction='none', log_target=True).sum(dim=-1)
+
+        if mask is not None:
+            kl_chunk = kl_chunk * mask[i:end]
+
+        kl_sum = kl_sum + kl_chunk.sum()
+
+    if mask is not None:
+        return kl_sum / mask.sum().clamp(min=1)
+    return kl_sum / num_tokens
 
 
 def compute_lm_loss(
