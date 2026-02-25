@@ -504,7 +504,7 @@ def main():
     print(f"Loading model: {args.model_path}")
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )

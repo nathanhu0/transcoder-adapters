@@ -86,14 +86,14 @@ def setup_models_bridging(config: ExperimentConfig):
         model = ModelWithTranscoder.from_pretrained(
             bridging_config.reference_model_path,
             config=hf_config,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
             trust_remote_code=True,
         )
         print(f"Swapping in base model MLP weights from: {config.model_name}")
         base_model = AutoModelForCausalLM.from_pretrained(
             config.model_name,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="cpu",
             trust_remote_code=True,
         )
@@ -111,7 +111,7 @@ def setup_models_bridging(config: ExperimentConfig):
         model = ModelWithTranscoder.from_pretrained(
             config.model_name,
             config=hf_config,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
             trust_remote_code=True,
         )
@@ -134,7 +134,7 @@ def setup_models_bridging(config: ExperimentConfig):
     print(f"Loading reference model: {bridging_config.reference_model_path}")
     ref_model = AutoModelForCausalLM.from_pretrained(
         bridging_config.reference_model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -185,7 +185,7 @@ def setup_models_direct(config: ExperimentConfig):
     model = ModelWithTranscoder.from_pretrained(
         config.model_name,
         config=hf_config,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -198,7 +198,7 @@ def setup_models_direct(config: ExperimentConfig):
         print(f"Copying token embeddings from: {direct_config.reference_model_path}")
         ref_model = AutoModelForCausalLM.from_pretrained(
             direct_config.reference_model_path,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="cpu",
             trust_remote_code=True,
         )
