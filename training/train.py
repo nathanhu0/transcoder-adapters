@@ -6,7 +6,7 @@ that encourage layer-wise compatibility with a reference model.
 """
 
 import os
-os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
+os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 
 import torch
 from torch.utils.data import DataLoader

@@ -51,7 +51,7 @@ def compute_kl_loss(
     # Chunking keeps only ~0.75GB alive at a time.
     num_tokens = logits_flat.size(0)
     chunk_size = 512
-    kl_sum = torch.tensor(0.0, device=logits_flat.device)
+    kl_sum = torch.zeros((), device=logits_flat.device, dtype=torch.float32)
 
     for i in range(0, num_tokens, chunk_size):
         end = min(i + chunk_size, num_tokens)
