@@ -17,11 +17,13 @@ bridging:
   lambda_bridge: 2.0
   lambda_nmse: 1
 
-data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl"
-val_data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
+dataset_type: "open_thoughts"
+dataset:
+  data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl"
+  val_data_path: "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
+  data_format: "qwen"
 max_seq_length: 10000
-data_format: "qwen"
-truncate: true
+length_excession_behavior: "truncate"
 loss_on_prompt: true
 
 batch_size: 1

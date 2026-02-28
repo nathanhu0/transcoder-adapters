@@ -2,7 +2,14 @@
 
 import yaml
 from dataclasses import dataclass, field
-from typing import Literal, Any
+from typing import Any
+
+from .dataset.openthoughts.config import OpenThoughtsConfig
+from .dataset.gemma.config import FineWebLMSysMixedConfig
+
+from .dataset.datasetspecific_config import DatasetSpecificConfig, DatasetType
+
+from .dataset.PredefinedDataset import LengthExcessionBehavior
 from pathlib import Path
 
 
@@ -56,19 +63,22 @@ class ExperimentConfig:
     # Training hyperparameters
     learning_rate: float = 8e-4
     batch_size: int = 1
-    micro_batch_size: int = 1
+    micro_batch_size: int | None = None # not really doing gradient accumulation anymore, see note in PredefinedDataset's _make_dataloader function. If None, this will be set to batch_size.
     num_epochs: int = 1
     warmup_ratio: float = 0.05
     gradient_clip_norm: float = 1.0
     seed: int = 42
 
     # Data settings
-    max_seq_length: int = 10000
-    data_path: str = "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl"
-    val_data_path: str | None = "/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
-    data_format: Literal["tokenizer", "deepseek"] = "deepseek"
-    truncate: bool = True
+    dataset_type: DatasetType = DatasetType.OPEN_THOUGHTS
+    length_excession_behavior: LengthExcessionBehavior = LengthExcessionBehavior.TRUNCATE
     loss_on_prompt: bool = True
+    dataset: DatasetSpecificConfig = OpenThoughtsConfig(
+        data_path="/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl",
+        data_format="deepseek",
+        max_seq_length=10000,
+        val_data_path="/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
+    )
 
     val_frequency: int = 1000  # Run validation every N steps
     layerwise_val_frequency: int = 2000  # Run layerwise validation every N steps
@@ -115,7 +125,8 @@ def load_config(config_path: str) -> ExperimentConfig:
     # Ensure numeric types are correct (YAML can load as strings)
     config.learning_rate = float(config.learning_rate)
     config.batch_size = int(config.batch_size)
-    config.micro_batch_size = int(config.micro_batch_size)
+    if config.micro_batch_size is None:
+        config.micro_batch_size = config.batch_size # int(config.micro_batch_size) # We're not doing gradient accumulation, see note in PredefinedDataset's _make_dataloader function.
 
     if config.transcoder:
         # Convert transcoder weights to float if they exist
@@ -128,6 +139,32 @@ def load_config(config_path: str) -> ExperimentConfig:
     if config.model_arch is None:
         from models import detect_architecture
         config.model_arch = detect_architecture(config.model_name)
+
+    # Convert dataset_type from string to enum
+    if isinstance(config.dataset_type, str):
+        config.dataset_type = DatasetType(config.dataset_type)
+    
+    if isinstance(config.length_excession_behavior, str):
+        config.length_excession_behavior = LengthExcessionBehavior(config.length_excession_behavior)
+
+    # Parse dataset sub-dict
+    if isinstance(config.dataset, dict):
+        match config.dataset_type:
+            case DatasetType.OPEN_THOUGHTS:
+                config.dataset = OpenThoughtsConfig(**config.dataset)
+            case DatasetType.FINEWEB_LMYSYSCHAT_MIXED:
+                config.dataset = FineWebLMSysMixedConfig(**config.dataset)
+            case _:
+                raise ValueError(f"Unsupported dataset type: {config.dataset_type}")
+    
+    assert config.dataset.dataset_type == config.dataset_type, (
+        f"Dataset type mismatch: you set dataset_type to {config.dataset_type}, but the provided dataset-specific config is for {config.dataset.dataset_type}. Please make sure these match."
+    )
+
+    # Print a warning if there were any extra keys in the YAML that were not used in the config dataclass
+    extra_keys = set(config_dict.keys()) - set(ExperimentConfig.__dataclass_fields__.keys())
+    if extra_keys:
+        print("Warning: the following keys in the config file were not recognized and will be ignored:", extra_keys)
 
     # Auto-compute run name and output dir if not specified
     config = _finalize_config(config)

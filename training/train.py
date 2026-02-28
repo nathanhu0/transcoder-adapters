@@ -9,16 +9,14 @@ import os
 os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 
 import torch
-from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import AutoTokenizer, AutoModelForCausalLM, get_cosine_schedule_with_warmup
 from tqdm import tqdm
 import argparse
 import wandb
-from functools import partial
 
 from training.config import load_config, ExperimentConfig, _finalize_config
-from training.dataset import OpenThoughtsDataset, collate_fn
+from training.dataset.PredefinedDataset import PredefinedDataset
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
 from models import get_transcoder_classes
@@ -141,7 +139,7 @@ def setup_models_bridging(config: ExperimentConfig):
     ref_model.eval()
     for param in ref_model.parameters():
         param.requires_grad = False
-    print(f"Reference model loaded and frozen")
+    print("Reference model loaded and frozen")
 
     return model, ref_model, tokenizer
 
@@ -245,52 +243,17 @@ def setup_models_direct(config: ExperimentConfig):
 
 def setup_data(config: ExperimentConfig, tokenizer):
     """Setup dataset and dataloader."""
-    print(f"Loading training dataset from: {config.data_path}")
-    print(f"  format={config.data_format}, truncate={config.truncate}, loss_on_prompt={config.loss_on_prompt}")
 
-    train_dataset = OpenThoughtsDataset(
-        data_path=config.data_path,
+    dataset_loader = PredefinedDataset(
+        dataset_type=config.dataset_type,
         tokenizer=tokenizer,
-        max_length=config.max_seq_length,
-        format=config.data_format,
-        truncate=config.truncate,
+        length_excession_behavior=config.length_excession_behavior,
         loss_on_prompt=config.loss_on_prompt,
+        dataset_specific_config=config.dataset,
     )
+    train_dataset, dataloaders = dataset_loader.load_dataset_and_dataloaders()
 
-    collate_with_tokenizer = partial(collate_fn, tokenizer=tokenizer)
-    generator = torch.Generator()
-    generator.manual_seed(config.seed)
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=config.micro_batch_size,
-        shuffle=True,
-        collate_fn=collate_with_tokenizer,
-        num_workers=0,
-        generator=generator
-    )
-
-    # Optional validation dataset
-    val_dataloader = None
-    if hasattr(config, 'val_data_path') and config.val_data_path:
-        print(f"Loading validation dataset from: {config.val_data_path}")
-        val_dataset = OpenThoughtsDataset(
-            data_path=config.val_data_path,
-            tokenizer=tokenizer,
-            max_length=config.max_seq_length,
-            format=config.data_format,
-            truncate=config.truncate,
-            loss_on_prompt=config.loss_on_prompt,
-        )
-        val_dataloader = DataLoader(
-            val_dataset,
-            batch_size=1,
-            shuffle=False,
-            collate_fn=collate_with_tokenizer,
-            num_workers=0
-        )
-
-    return train_dataset, train_dataloader, val_dataloader
+    return train_dataset, dataloaders["train"], dataloaders.get("val", None)
 
 
 def setup_training(config: ExperimentConfig, model, dataset):
@@ -524,7 +487,9 @@ def train_epoch(
     current_metrics = {}
     samples_seen = total_samples_seen
 
-    gradient_accumulation_steps = config.batch_size // config.micro_batch_size
+    assert config.micro_batch_size is not None
+    gradient_accumulation_steps = config.batch_size // config.micro_batch_size # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
+    gradient_accumulation_steps = 1
 
     embed_device = model.get_input_embeddings().weight.device
     epoch_pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
@@ -630,7 +595,7 @@ def train_epoch(
 
             # Run comprehensive layerwise validation (bridging only)
             if config.bridging and val_dataloader is not None and global_step % config.layerwise_val_frequency == 0:
-                print(f"  Running layerwise validation...")
+                print("  Running layerwise validation...")
                 layerwise_metrics = validate_layerwise(model, ref_model, val_dataloader, config)
                 if config.use_wandb:
                     wandb.log(layerwise_metrics, step=global_step)
@@ -898,12 +863,12 @@ def main():
 
     # Print mode-specific info
     if config.direct:
-        print(f"Starting direct fine-tuning")
+        print("Starting direct fine-tuning")
         print(f"  Base model: {config.model_name}")
         print(f"  Copied tokens: {config.direct.copied_tokens}")
     else:
         assert config.bridging is not None
-        print(f"Starting bridging training")
+        print("Starting bridging training")
         print(f"  Base model: {config.model_name}")
         print(f"  Reference model: {config.bridging.reference_model_path}")
         print(f"  Loss type: {config.bridging.loss_type}")
@@ -927,7 +892,7 @@ def main():
             config=config.__dict__
         )
 
-    print(f"Training setup:")
+    print("Training setup:")
     print(f"  - Train dataset size: {len(train_dataset)}")
     print(f"  - Total steps: {total_steps}")
     print(f"  - Warmup steps: {warmup_steps}")

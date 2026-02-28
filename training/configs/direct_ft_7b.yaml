@@ -12,11 +12,13 @@ direct:
   copied_tokens: ["<think>", "</think>"]
 
 # Data settings
-data_path: "hf://nathu0/transcoder-adapters-openthoughts3-stratified-55k/data/train.jsonl"
-val_data_path: "hf://nathu0/transcoder-adapters-openthoughts3-stratified-55k/data/val.jsonl"
-max_seq_length: 10000
-data_format: "qwen"
-truncate: true
+dataset_type: "open_thoughts"
+dataset:
+  data_path: "hf://nathu0/transcoder-adapters-openthoughts3-stratified-55k/data/train.jsonl"
+  val_data_path: "hf://nathu0/transcoder-adapters-openthoughts3-stratified-55k/data/val.jsonl"
+  data_format: "qwen"
+  max_seq_length: 10000
+length_excession_behavior: "truncate"
 loss_on_prompt: false
 
 batch_size: 1

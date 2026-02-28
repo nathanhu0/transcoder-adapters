@@ -1,6 +1,5 @@
 import torch
 
-
 def collate_fn(examples, tokenizer):
     """Simple collate function for batching examples."""
     # Extract sequences

@@ -1,6 +1,9 @@
 from torch.utils.data import Dataset
-from typing import Any, Literal
+from typing import Any
 import json
+
+from training.dataset.types import DatasetItem
+from training.dataset.openthoughts.types import DataFormat
 
 
 # DeepSeek R1 Distill format tokens
@@ -24,7 +27,7 @@ class OpenThoughtsDataset(Dataset):
         tokenizer,
         max_length: int = 8192,
         # Format
-        format: Literal["tokenizer", "deepseek"] = "tokenizer",
+        format: DataFormat = "tokenizer",
         # Truncation
         truncate: bool = False,
         # Labels
@@ -107,7 +110,7 @@ class OpenThoughtsDataset(Dataset):
         """Return the number of examples."""
         return len(self.examples)
 
-    def __getitem__(self, idx: int) -> dict[str, Any]:
+    def __getitem__(self, idx: int) -> DatasetItem:
         """Get a single example."""
         example = self.examples[idx]
         conversations = example['conversations']
