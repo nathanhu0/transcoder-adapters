@@ -145,7 +145,7 @@ class PredefinedDataset:
         )
         dataloaders: PredefinedDataset.Dataloaders = {
             "train": DataLoader(
-                self._loaded_datasets["train"],
+                self._loaded_datasets["train"], # pyright: ignore[reportArgumentType]
                 batch_size=self.batch_size,  # used to be micro_batch_size instead of using the normal batch_size: there were two seperate parameters. This was because we were trying gradient accumulation, however we decided it wasn't worth it so in all cases we set micro_batch_size = batch_size. So, I'm removing micro_batch_size and just using batch_size directly.
                 shuffle=True,
                 collate_fn=collate_with_tokenizer,
@@ -156,7 +156,7 @@ class PredefinedDataset:
 
         if "val" in self._loaded_datasets:
             dataloaders["val"] = DataLoader(
-                self._loaded_datasets["val"],
+                self._loaded_datasets["val"], # pyright: ignore[reportArgumentType]
                 batch_size=1,
                 shuffle=False,
                 collate_fn=collate_with_tokenizer,
