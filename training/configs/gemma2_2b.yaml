@@ -22,8 +22,8 @@ dataset_type: "fineweb_lmysyschat_mixed"
 dataset:
   pretraining_datapath: "science-of-finetuning/fineweb-1m-sample"
   chat_conversations_datapath: "lmsys/lmsys-chat-1m"
-  pretraining_max_seq_length: 2048
-  chat_max_seq_length: 8192
+  pretraining_max_seq_length: 1000
+  chat_max_seq_length: 1000
 length_excession_behavior: "truncate"
 loss_on_prompt: true
 
