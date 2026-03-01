@@ -73,12 +73,12 @@ class ExperimentConfig:
     dataset_type: DatasetType = DatasetType.OPEN_THOUGHTS
     length_excession_behavior: LengthExcessionBehavior = LengthExcessionBehavior.TRUNCATE
     loss_on_prompt: bool = True
-    dataset: DatasetSpecificConfig = OpenThoughtsConfig(
+    dataset: DatasetSpecificConfig = field(default_factory=lambda: OpenThoughtsConfig(
         data_path="/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_train.jsonl",
         data_format="deepseek",
         max_seq_length=10000,
         val_data_path="/nlp/scr/nathu/sparse-adaptation/data/openthoughts/stratified_n55000_t10000_s42_val.jsonl"
-    )
+    ))
 
     val_frequency: int = 1000  # Run validation every N steps
     layerwise_val_frequency: int = 2000  # Run layerwise validation every N steps
