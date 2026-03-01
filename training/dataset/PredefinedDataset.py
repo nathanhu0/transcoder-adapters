@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch import Generator as TorchGenerator
 
 from .collate import collate_fn
-from .types import DatasetItem
+from .types import DatasetItem, SizedDataset
 
 from .gemma.config import FineWebLMSysMixedConfig
 
@@ -25,7 +25,7 @@ class PredefinedDataset:
 
     # Type for loaded datasets
     DatasetSplits = Literal["train", "val"]
-    LoadedDatasets = dict[DatasetSplits, Dataset[DatasetItem]]
+    LoadedDatasets = dict[DatasetSplits, SizedDataset[DatasetItem]]
     Dataloaders = dict[DatasetSplits, DataLoader[DatasetItem]]
 
     def __init__(
@@ -50,7 +50,7 @@ class PredefinedDataset:
                 f"but dataset_type is {dataset_type}"
             )
 
-        self.loaded_datasets: PredefinedDataset.LoadedDatasets | None = None
+        self._loaded_datasets: PredefinedDataset.LoadedDatasets | None = None
         """
         Cache for loaded datasets. Stores training split in "train" and validation split in "val" (if applicable). Initialized to None, and populated on first call to load_dataset().
         """
@@ -62,9 +62,9 @@ class PredefinedDataset:
         """
         Loads the dataset according to the type and configuration parameters specified in the constructor. Caches the loaded dataset for future calls; there's no need to call this method more than once per instance.
         """
-        if self.loaded_datasets is None:
-            self.loaded_datasets = self._make_dataset()
-        return self.loaded_datasets
+        if self._loaded_datasets is None:
+            self._loaded_datasets = self._make_dataset()
+        return self._loaded_datasets
 
     def _make_dataset(self) -> LoadedDatasets:
         print(f"Loading training dataset of type {self.dataset_type} with config:", self.dataset_specific_config)
@@ -137,15 +137,15 @@ class PredefinedDataset:
         generator = TorchGenerator()
         generator.manual_seed(self.dataloader_seed)
 
-        assert self.loaded_datasets is not None, (
+        assert self._loaded_datasets is not None, (
             "Datasets must be loaded before creating dataloaders"
         )
-        assert "train" in self.loaded_datasets, (
+        assert "train" in self._loaded_datasets, (
             "Training split ('train') is required in loaded datasets"
         )
         dataloaders: PredefinedDataset.Dataloaders = {
             "train": DataLoader(
-                self.loaded_datasets["train"],
+                self._loaded_datasets["train"],
                 batch_size=self.batch_size,  # used to be micro_batch_size instead of using the normal batch_size: there were two seperate parameters. This was because we were trying gradient accumulation, however we decided it wasn't worth it so in all cases we set micro_batch_size = batch_size. So, I'm removing micro_batch_size and just using batch_size directly.
                 shuffle=True,
                 collate_fn=collate_with_tokenizer,
@@ -154,24 +154,24 @@ class PredefinedDataset:
             )
         }
 
-        if "val" in self.loaded_datasets:
+        if "val" in self._loaded_datasets:
             dataloaders["val"] = DataLoader(
-                self.loaded_datasets["val"],
+                self._loaded_datasets["val"],
                 batch_size=1,
                 shuffle=False,
                 collate_fn=collate_with_tokenizer,
                 num_workers=0,
             )
 
-        assert dataloaders.keys() == self.loaded_datasets.keys(), (
+        assert dataloaders.keys() == self._loaded_datasets.keys(), (
             "Note: Dataloader did not generate loaders for all dataset splits"
         )
         return dataloaders
-    
-    def load_dataset_and_dataloaders(self) -> tuple[LoadedDatasets, Dataloaders]:
+
+    def load_datasets_and_dataloaders(self) -> tuple[LoadedDatasets, Dataloaders]:
         """
-        Loads the dataset (if not already loaded) and creates dataloaders for each split. Returns a tuple of (loaded_datasets, dataloaders).
+        Loads the dataset (if not already loaded) and creates dataloaders for each split. Returns a tuple of (loaded_datasets [all splits of the loaded dataset], dataloaders [one data loader for each split]).
         """
-        loaded_datasets = self._load_dataset()
+        datasets = self._load_dataset()
         dataloaders = self._make_dataloader()
-        return loaded_datasets, dataloaders
+        return datasets, dataloaders

@@ -1,14 +1,7 @@
 import random
-from typing import Protocol
 
 from torch.utils.data import Dataset
-from training.dataset.types import DatasetItem
-
-
-class SizedDataset(Protocol):
-    def __len__(self) -> int: ...
-    def __getitem__(self, idx: int) -> DatasetItem: ...
-
+from training.dataset.types import DatasetItem, SizedDataset
 
 class MixedDataset(Dataset):
     """Randomly interleaves multiple datasets according to specified weights.

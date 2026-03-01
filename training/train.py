@@ -6,6 +6,10 @@ that encourage layer-wise compatibility with a reference model.
 """
 
 import os
+
+from torch.utils.data.dataloader import DataLoader
+
+from training.dataset.types import DatasetItem, SizedDataset
 os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 
 import torch
@@ -241,7 +245,7 @@ def setup_models_direct(config: ExperimentConfig):
     return model, None, tokenizer
 
 
-def setup_data(config: ExperimentConfig, tokenizer):
+def setup_data(config: ExperimentConfig, tokenizer) -> tuple[SizedDataset[DatasetItem], DataLoader[DatasetItem], DataLoader[DatasetItem] | None]:
     """Setup dataset and dataloader."""
 
     dataset_loader = PredefinedDataset(
@@ -251,9 +255,9 @@ def setup_data(config: ExperimentConfig, tokenizer):
         loss_on_prompt=config.loss_on_prompt,
         dataset_specific_config=config.dataset,
     )
-    train_dataset, dataloaders = dataset_loader.load_dataset_and_dataloaders()
+    datasets, dataloaders = dataset_loader.load_datasets_and_dataloaders()
 
-    return train_dataset, dataloaders["train"], dataloaders.get("val", None)
+    return datasets["train"], dataloaders["train"], dataloaders.get("val", None)
 
 
 def setup_training(config: ExperimentConfig, model, dataset):
@@ -488,8 +492,9 @@ def train_epoch(
     samples_seen = total_samples_seen
 
     assert config.micro_batch_size is not None
-    gradient_accumulation_steps = config.batch_size // config.micro_batch_size # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = (
+        config.batch_size // config.micro_batch_size
+    )  # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
 
     embed_device = model.get_input_embeddings().weight.device
     epoch_pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
