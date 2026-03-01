@@ -4,7 +4,7 @@ from typing import ClassVar, Literal
 from training.dataset.datasetspecific_config import DatasetSpecificConfig, DatasetType
 
 
-@dataclass
+@dataclass(frozen=True)
 class FineWebLMSysMixedConfig(DatasetSpecificConfig):
     dataset_type: ClassVar[DatasetType] = DatasetType.FINEWEB_LMYSYSCHAT_MIXED
 

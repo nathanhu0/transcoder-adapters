@@ -1,5 +1,6 @@
+from dataclasses import dataclass
 from enum import Enum
-from typing import ClassVar, Protocol
+from typing import ClassVar
 
 
 class DatasetType(Enum):
@@ -7,5 +8,6 @@ class DatasetType(Enum):
     FINEWEB_LMYSYSCHAT_MIXED = "fineweb_lmysyschat_mixed"
 
 
-class DatasetSpecificConfig(Protocol):
+@dataclass(frozen=True)
+class DatasetSpecificConfig:
     dataset_type: ClassVar[DatasetType]

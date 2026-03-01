@@ -5,7 +5,7 @@ from training.dataset.datasetspecific_config import DatasetSpecificConfig, Datas
 from .types import DataFormat
 
 
-@dataclass
+@dataclass(frozen=True)
 class OpenThoughtsConfig(DatasetSpecificConfig):
     dataset_type: ClassVar[DatasetType] = DatasetType.OPEN_THOUGHTS
 
