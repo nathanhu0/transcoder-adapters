@@ -492,9 +492,11 @@ def train_epoch(
     current_metrics = {}
     samples_seen = total_samples_seen
 
+    micro_batch_size = config.micro_batch_size or config.batch_size
+
     gradient_accumulation_steps = (
-        config.batch_size // config.micro_batch_size
-    ) if config.micro_batch_size else 1  # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
+        config.batch_size // micro_batch_size
+    ) # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
 
     embed_device = model.get_input_embeddings().weight.device
     epoch_pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
@@ -516,7 +518,7 @@ def train_epoch(
 
         accumulation_step += 1
         current_batch_losses.append(step_metrics.get("train/total_loss", 0.0))
-        samples_seen += config.micro_batch_size
+        samples_seen += micro_batch_size
 
         # Accumulate metrics
         for k, v in step_metrics.items():

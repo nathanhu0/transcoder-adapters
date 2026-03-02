@@ -5,4 +5,4 @@
 export HF_TOKEN=$(cat ~/.shell/secrets/hf_token)
 
 # Submit batch
-sbatch ./slurm_run_debug.sh
+sbatch ./slurm_run_debug.sh "$@"
