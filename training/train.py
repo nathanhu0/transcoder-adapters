@@ -255,6 +255,7 @@ def setup_data(config: ExperimentConfig, tokenizer) -> tuple[SizedDataset[Datase
         length_excession_behavior=config.length_excession_behavior,
         loss_on_prompt=config.loss_on_prompt,
         dataset_specific_config=config.dataset,
+        batch_size=config.batch_size,
     )
     datasets, dataloaders = dataset_loader.load_datasets_and_dataloaders()
 
