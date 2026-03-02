@@ -125,8 +125,8 @@ def load_config(config_path: str) -> ExperimentConfig:
     # Ensure numeric types are correct (YAML can load as strings)
     config.learning_rate = float(config.learning_rate)
     config.batch_size = int(config.batch_size)
-    if config.micro_batch_size is None:
-        config.micro_batch_size = config.batch_size # int(config.micro_batch_size) # We're not doing gradient accumulation, see note in PredefinedDataset's _make_dataloader function.
+    # if config.micro_batch_size is None:
+    #     config.micro_batch_size = config.batch_size # int(config.micro_batch_size) # We're not doing gradient accumulation, see note in PredefinedDataset's _make_dataloader function.
 
     if config.transcoder:
         # Convert transcoder weights to float if they exist
@@ -214,7 +214,7 @@ def _finalize_config(config: ExperimentConfig) -> ExperimentConfig:
         run_parts.append(f"lr{config.learning_rate:.0e}")
         run_parts.append(f"bs{config.batch_size}")
 
-        run_parts.append(f"slurm{slurm_job_id}") # so we can cross-reference if needed
+        run_parts.append(f"sl{slurm_job_id}") # so we can cross-reference if needed
 
         config.wandb_run_name = "_".join(run_parts)
 

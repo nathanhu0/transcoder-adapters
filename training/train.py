@@ -491,10 +491,9 @@ def train_epoch(
     current_metrics = {}
     samples_seen = total_samples_seen
 
-    assert config.micro_batch_size is not None
     gradient_accumulation_steps = (
         config.batch_size // config.micro_batch_size
-    )  # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
+    ) if config.micro_batch_size else 1  # Note: not rly doing gradient accumulation anymore, see PredefinedDataset._make_dataloader comment.
 
     embed_device = model.get_input_embeddings().weight.device
     epoch_pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
@@ -819,6 +818,7 @@ def main():
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--learning_rate", "-lr", type=float, help="Override learning rate")
     parser.add_argument("--l1_weight", type=float, help="Override L1 weight")
+    parser.add_argument("--batch_size", type=int, help="Override batch size")
     parser.add_argument("--debug_mode", nargs="?", const="true", default=None, help="Override debug_mode (--debug_mode, --debug_mode=true, --debug_mode=false). If activating debug mode through this setting, wandb will be disabled.")
     args = parser.parse_args()
 
@@ -842,6 +842,11 @@ def main():
     if args.l1_weight is not None and config.transcoder:
         config.transcoder.l1_weight = args.l1_weight
         print(f"Override L1 weight: {args.l1_weight}")
+        config_changed = True
+    
+    if args.batch_size is not None:
+        config.batch_size = args.batch_size
+        print(f"Override batch size: {args.batch_size}")
         config_changed = True
 
     if args.debug_mode is not None:
