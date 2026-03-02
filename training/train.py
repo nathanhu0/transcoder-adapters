@@ -873,6 +873,7 @@ def main():
 
     # Compile models for faster standard forward passes.
     # forward_mixed / compute_nmse_loss use manual layer loops and remain uncompiled.
+    print("Compiling models...")
     model = torch.compile(model)
     if ref_model is not None:
         ref_model = torch.compile(ref_model)
