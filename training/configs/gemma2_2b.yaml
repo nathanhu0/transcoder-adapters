@@ -27,10 +27,10 @@ dataset:
 length_excession_behavior: "truncate"
 loss_on_prompt: true
 
-batch_size: 1
-micro_batch_size: 1
+batch_size: 4
 learning_rate: 8e-4
 num_epochs: 1
 warmup_ratio: 0.05
 
 use_wandb: true
+save_checkpoints: true

@@ -916,6 +916,7 @@ def main():
 
         # Save checkpoint at end of epoch (overwrites previous latest)
         if config.save_checkpoints:
+            print(f"  Saving checkpoint at end of epoch {epoch}...")
             save_latest_checkpoint(model, tokenizer, config.output_dir, current_step)
 
     print("Training complete!")

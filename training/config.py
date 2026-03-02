@@ -94,7 +94,7 @@ class ExperimentConfig:
 
     # Checkpoint settings
     save_checkpoints: bool = False  # If True, save periodic checkpoints (overwrites single 'latest' dir)
-    checkpoint_frequency: int = 10000  # Save checkpoint every N steps
+    checkpoint_frequency: int = 8192  # Save checkpoint every N steps
 
     # Debug settings
     debug_mode: bool = False  # If True, break after 50 steps for quick testing
@@ -173,6 +173,8 @@ def load_config(config_path: str) -> ExperimentConfig:
 
 def _finalize_config(config: ExperimentConfig) -> ExperimentConfig:
     """Finalize config by computing run names and output directories."""
+    import os
+    slurm_job_id = os.environ.get("SLURM_JOB_ID", "local")
 
     # Build run name from hyperparameters
     if config.wandb_run_name is None:
@@ -212,17 +214,17 @@ def _finalize_config(config: ExperimentConfig) -> ExperimentConfig:
         run_parts.append(f"lr{config.learning_rate:.0e}")
         run_parts.append(f"bs{config.batch_size}")
 
+        run_parts.append(f"slurm{slurm_job_id}") # so we can cross-reference if needed
+
         config.wandb_run_name = "_".join(run_parts)
 
     # Build output directory
     if config.output_dir is None:
-        import os
         from datetime import datetime
         user = os.environ.get("USER")
         if not user:
             raise RuntimeError("$USER environment variable is not set. Provide an output_dir in your config or set the USER environment variable so we know where to save checkpoints.")
         date_str = datetime.now().strftime("%Y-%m-%d_%H%M")
-        slurm_job_id = os.environ.get("SLURM_JOB_ID", "local")
         config.output_dir = f"/nlp/scr/{user}/sparse-adaptation/checkpoints/{config.wandb_run_name}_{date_str}_{slurm_job_id}"
         print(f"Checkpoints save directory: {config.output_dir}")
 

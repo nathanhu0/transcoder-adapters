@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH --constraint=48G
 #SBATCH --mem=128G
-#SBATCH --partition=jag-hi
+#SBATCH --partition=jag-standard
 #SBATCH --job-name=gemma2_2b
 #SBATCH --time=21-00:00:00
 #SBATCH --output=logs/%j.out
