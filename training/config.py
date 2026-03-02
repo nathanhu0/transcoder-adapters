@@ -100,8 +100,15 @@ class ExperimentConfig:
     debug_mode: bool = False  # If True, break after 50 steps for quick testing
 
 
-def load_config(config_path: str) -> ExperimentConfig:
-    """Load configuration from YAML file."""
+def load_config(config_path: str, overrides: dict[str, Any] | None = None) -> ExperimentConfig:
+    """Load configuration from YAML file.
+
+    Args:
+        config_path: Path to the YAML config file.
+        overrides: Optional dict of overrides. Keys must be valid ExperimentConfig fields.
+            If debug_mode is set to True, wandb is also disabled and _debug is appended to run_name_prefix.
+            If any overrides are applied, wandb_run_name and output_dir are regenerated.
+    """
     config_path = Path(config_path) # type: ignore
 
     if not config_path.exists(): # type: ignore
@@ -121,6 +128,43 @@ def load_config(config_path: str) -> ExperimentConfig:
 
     # Create main config with adapter configs
     config = ExperimentConfig(**config_dict, **adapter_configs)
+
+    # Apply overrides
+    if overrides:
+        valid_keys = set(ExperimentConfig.__dataclass_fields__.keys())
+        # l1_weight is a known nested override (transcoder.l1_weight)
+        NESTED_OVERRIDES = {
+            "l1_weight": ("transcoder", "l1_weight"),
+            "n_features": ("transcoder", "n_features"),
+        }
+        invalid_keys = set(overrides.keys()) - valid_keys - set(NESTED_OVERRIDES.keys())
+        if invalid_keys:
+            raise ValueError(
+                f"Invalid override keys (not in ExperimentConfig): {invalid_keys}"
+            )
+
+        for key, value in overrides.items():
+            if key in NESTED_OVERRIDES:
+                parent_attr, child_attr = NESTED_OVERRIDES[key]
+                parent = getattr(config, parent_attr, None)
+                if parent is not None:
+                    setattr(parent, child_attr, value)
+                    print(f"Override {parent_attr}.{child_attr}: {value}")
+            else:
+                setattr(config, key, value)
+                print(f"Override {key}: {value}")
+
+        # debug_mode=True has side effects
+        if overrides.get("debug_mode") is True:
+            config.use_wandb = False
+            print("Debug mode enabled through override: wandb disabled")
+            if config.run_name_prefix and not config.run_name_prefix.endswith("_debug"):
+                config.run_name_prefix += "_debug"
+                print(f"Added _debug to run_name_prefix: '{config.run_name_prefix}'")
+
+        # Force regeneration of computed fields
+        config.wandb_run_name = None
+        config.output_dir = None
 
     # Ensure numeric types are correct (YAML can load as strings)
     config.learning_rate = float(config.learning_rate)

@@ -19,7 +19,8 @@ from tqdm import tqdm
 import argparse
 import wandb
 
-from training.config import load_config, ExperimentConfig, _finalize_config
+from typing import Any
+from training.config import load_config, ExperimentConfig
 from training.dataset.PredefinedDataset import PredefinedDataset
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
@@ -817,59 +818,36 @@ def main():
     parser = argparse.ArgumentParser(description="Train with bridging loss")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--learning_rate", "-lr", type=float, help="Override learning rate")
-    parser.add_argument("--l1_weight", type=float, help="Override L1 weight")
+    parser.add_argument("--l1_weight", type=float, help="Override transcoder L1 weight")
+    parser.add_argument("--n_features", type=int, help="Override transcoder n_features")
     parser.add_argument("--batch_size", type=int, help="Override batch size")
+    parser.add_argument("--num_epochs", type=int, help="Override number of epochs")
     parser.add_argument("--debug_mode", nargs="?", const="true", default=None, help="Override debug_mode (--debug_mode, --debug_mode=true, --debug_mode=false). If activating debug mode through this setting, wandb will be disabled.")
     args = parser.parse_args()
 
-    # Load config
-    config = load_config(args.config)
+    # Build overrides dict from CLI args (all non-None args except "config")
+    overrides: dict[str, Any] = {
+        k: v for k, v in vars(args).items()
+        if k != "config" and v is not None
+    }
+
+    # debug_mode comes in as a string from argparse, convert to bool
+    if "debug_mode" in overrides:
+        if overrides["debug_mode"].lower() == "true":
+            overrides["debug_mode"] = True
+        elif overrides["debug_mode"].lower() == "false":
+            overrides["debug_mode"] = False
+        else:
+            parser.error(f"Invalid value for --debug_mode: '{overrides['debug_mode']}'. Must be 'true' or 'false'.")
+
+    # Load config with overrides
+    config = load_config(args.config, overrides=overrides)
 
     # Validate exactly one training mode is set
     has_bridging = config.bridging is not None
     has_direct = config.direct is not None
     if has_bridging == has_direct:
         raise ValueError("Config must specify exactly one of 'bridging' or 'direct' section.")
-
-    # Apply overrides
-    config_changed = False
-
-    if args.learning_rate is not None:
-        config.learning_rate = args.learning_rate
-        print(f"Override learning rate: {args.learning_rate}")
-        config_changed = True
-
-    if args.l1_weight is not None and config.transcoder:
-        config.transcoder.l1_weight = args.l1_weight
-        print(f"Override L1 weight: {args.l1_weight}")
-        config_changed = True
-    
-    if args.batch_size is not None:
-        config.batch_size = args.batch_size
-        print(f"Override batch size: {args.batch_size}")
-        config_changed = True
-
-    if args.debug_mode is not None:
-        if args.debug_mode.lower() == "true":
-            config.debug_mode = True
-            config.use_wandb = False
-            print("Using debug mode through flag: wandb disabled")
-            if config.run_name_prefix and not config.run_name_prefix.endswith("_debug"):
-                config.run_name_prefix += "_debug"
-                print(f"Using debug mode through flag: added _debug to run_name_prefix, now '{config.run_name_prefix}'")
-        elif args.debug_mode.lower() == "false":
-            config.debug_mode = False
-        else:
-            parser.error(f"Invalid value for --debug_mode: '{args.debug_mode}'. Must be 'true' or 'false'.")
-        print(f"Override debug_mode: {config.debug_mode}")
-
-    if config_changed:
-        # Update run name and output dir to reflect the overrides
-        config.wandb_run_name = None  # Force regeneration
-        config.output_dir = None      # Force regeneration
-        config = _finalize_config(config)  # Regenerate names with new params
-        print(f"Updated run name: {config.wandb_run_name}")
-        print(f"Updated output dir: {config.output_dir}")
 
     # Print mode-specific info
     if config.direct:
