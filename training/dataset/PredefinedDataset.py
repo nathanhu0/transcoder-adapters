@@ -1,7 +1,8 @@
 from enum import Enum
 from functools import partial
 from typing import Literal
-from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data import Dataset, DataLoader, Subset
 from torch import Generator as TorchGenerator
 
 from .collate import collate_fn
@@ -38,12 +39,14 @@ class PredefinedDataset:
         dataset_specific_config: DatasetSpecificConfig | None = None,
         batch_size: int = 1,
         dataloader_seed: int = 81,
+        dataset_rows: int | None = None,
     ):
         self.dataset_type = dataset_type
         self.tokenizer = tokenizer
         self.length_excession_behavior = length_excession_behavior
         self.loss_on_prompt = loss_on_prompt
         self.dataset_specific_config = dataset_specific_config
+        self.dataset_rows = dataset_rows
         if dataset_specific_config is not None:
             assert dataset_specific_config.dataset_type == dataset_type, (
                 f"Config type mismatch: config is for {dataset_specific_config.dataset_type}, "
@@ -64,6 +67,15 @@ class PredefinedDataset:
         """
         if self._loaded_datasets is None:
             self._loaded_datasets = self._make_dataset()
+            if self.dataset_rows is not None:
+                g = TorchGenerator().manual_seed(self.dataloader_seed)
+                for split, ds in self._loaded_datasets.items():
+                    if len(ds) > self.dataset_rows:
+                        indices = torch.randperm(len(ds), generator=g)[:self.dataset_rows]
+                        print(
+                            f"dataset_rows={self.dataset_rows}, so randomly subsampling {self.dataset_rows} / {len(ds)} total rows from '{split}'"
+                        )
+                        self._loaded_datasets[split] = Subset(ds, indices)  # pyright: ignore[reportArgumentType]
         return self._loaded_datasets
 
     def _make_dataset(self) -> LoadedDatasets:
