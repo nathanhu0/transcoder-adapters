@@ -149,7 +149,9 @@ class PredefinedDataset:
                 batch_size=self.batch_size,  # used to be micro_batch_size instead of using the normal batch_size: there were two seperate parameters. This was because we were trying gradient accumulation, however we decided it wasn't worth it so in all cases we set micro_batch_size = batch_size. So, I'm removing micro_batch_size and just using batch_size directly.
                 shuffle=True,
                 collate_fn=collate_with_tokenizer,
-                num_workers=0,
+                num_workers=4,
+                pin_memory=True,
+                persistent_workers=True,
                 generator=generator,
             )
         }
@@ -160,7 +162,9 @@ class PredefinedDataset:
                 batch_size=1,
                 shuffle=False,
                 collate_fn=collate_with_tokenizer,
-                num_workers=0,
+                num_workers=4,
+                pin_memory=True,
+                persistent_workers=True,
             )
 
         assert dataloaders.keys() == self._loaded_datasets.keys(), (
