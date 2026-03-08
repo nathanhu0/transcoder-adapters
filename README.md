@@ -1,65 +1,12 @@
-# Transcoder Adapters
+# Transcoder Adapters for Reasoning-Model Diffing
 
-Sparse transcoder adapters for bridging distillation. Trains a parallel ReLU-based sparse branch on each MLP layer to bridge the gap between a base model (Qwen2.5-Math-7B) and a reference model (DeepSeek-R1-Distill-Qwen-7B), using layer-wise bridging losses to encourage compatibility.
+Code for training, analyzing, and serving transcoder adapters, as described in [Transcoder Adapters for Reasoning-Model Diffing](https://transcoder-adapters.github.io/).
 
-## Repo Structure
-
-```
-transcoder_adapters/
-├── models/
-│   ├── qwen2_transcoder.py          # Qwen2 + transcoder model (training & inference)
-│   └── qwen2_transcoder_vllm.py     # vLLM-compatible implementation
-├── training/
-│   ├── train.py                     # Main training script
-│   ├── config.py                    # Experiment config dataclasses + YAML loading
-│   ├── configs/
-│   │   └── r1_distil_7b.yaml        # Default experiment config
-│   ├── losses.py                    # KL, LM, and NMSE loss functions
-│   ├── forward_utils.py             # Mixed forward passes for bridging
-│   └── dataset.py                   # OpenThoughts dataset loader
-├── demo/
-│   ├── adapter_generation_transformers.py  # Load from HF + generate (adapters on/off)
-│   └── adapter_generation_vllm.py          # Load from HF + generate with vLLM
-├── misc_scripts/
-│   └── filter_openthoughts_stratified.py   # Dataset reproduction script
-├── analysis/                        # TODO: activation collection, auto-interp, dashboards
-└── requirements.txt
-```
-
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-## Training
-
-```bash
-python -m training.train --config training/configs/r1_distil_7b.yaml
-```
-
-Override hyperparameters from the command line:
-```bash
-python -m training.train --config training/configs/r1_distil_7b.yaml --learning_rate 1e-3 --l1_weight 0.01
-```
-
-## How It Works
-
-Each transformer layer's MLP is extended with a transcoder branch:
-```
-output = original_mlp(x) + dec(relu(enc(x)))
-```
-
-- `enc`: d_model -> n_features (with bias, ReLU activation)
-- `dec`: n_features -> d_model (initialized to zero for zero initial contribution)
-
-Only transcoder parameters are trained; the base model is frozen. Training uses bridging losses (KL divergence at sampled layer cutoffs) plus optional NMSE activation matching to encourage layer-wise compatibility with the reference model.
-
-Checkpoints are saved as standard HuggingFace format via `model.save_pretrained()` -- no conversion step needed.
+Transcoder adapters learn an interpretable approximation of the difference in MLP computation before and after fine-tuning. Each transformer layer's MLP is extended with a sparse parallel branch: `output = original_mlp(x) + dec(relu(enc(x)))`. Only the adapter parameters are trained; the base model is frozen.
 
 ## Pretrained Checkpoints
 
-Five checkpoints trained with different L1 sparsity weights (and resulting L0 activation counts):
+Five checkpoints trained on DeepSeek-R1-Distill-Qwen-7B with different L1 sparsity weights:
 
 | L1 Weight | Val L0 | HuggingFace |
 |-----------|--------|-------------|
@@ -80,11 +27,33 @@ model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
 )
 ```
 
-See `demo/adapter_generation_transformers.py` and `demo/adapter_generation_vllm.py` for full examples including adapter on/off toggling.
+See `demo/` for full examples including adapter on/off toggling and vLLM serving.
 
-## vLLM
+## Training
 
-We use a fork of [evalchemy](https://github.com/mlfoundations/evalchemy) for evaluations. To aid in future work, we provide a vLLM implementation of transcoder adapters in `models/qwen2_transcoder_vllm.py`. See `demo/adapter_generation_vllm.py` for usage.
+Install dependencies, then run:
+
+```bash
+pip install -r requirements.txt
+python -m training.train --config training/configs/r1_distil_7b.yaml
+```
+
+Training requires two models from the same architecture family: a **base model** (e.g., `Qwen/Qwen2.5-Math-7B`) and a **target model** (e.g., `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`). The adapter learns to approximate the MLP difference between them using bridging losses (KL divergence at sampled layer cutoffs + NMSE activation matching).
+
+Configs are YAML files — see `training/configs/` for examples. Key settings:
+
+- `model_name`: base model (MLP weight donor)
+- `bridging.reference_model_path`: target model (distillation target)
+- `transcoder.n_features`: width of the sparse adapter (e.g., 8192)
+- `transcoder.l1_weight`: L1 sparsity penalty — higher values produce sparser adapters with fewer active features per token
+- `learning_rate`: we used 8e-4 for all experiments
+
+The two most important hyperparameters — `learning_rate` and `l1_weight` — can be overridden from the command line without editing the config:
+```bash
+python -m training.train --config training/configs/r1_distil_7b.yaml --learning_rate 1e-3 --l1_weight 0.01
+```
+
+Checkpoints are saved as standard HuggingFace format via `model.save_pretrained()`. Training logs to [Weights & Biases](https://wandb.ai) by default.
 
 ## Data
 
@@ -93,7 +62,30 @@ Training uses a stratified subset of [OpenThoughts3-1.2M](https://huggingface.co
 - **Pre-built splits**: [nathu0/transcoder-adapters-openthoughts3-stratified-55k](https://huggingface.co/datasets/nathu0/transcoder-adapters-openthoughts3-stratified-55k) (49,952 train / 4,996 val)
 - **Reproduction script**: `misc_scripts/filter_openthoughts_stratified.py`
 
-## Related Repos
+## Analysis
 
-- **evalchemy** (fork): Evaluation framework with vLLM transcoder support
-- **circuit-tracer** (fork): Circuit analysis for transcoder features
+For feature activation collection, classification, auto-interp, and attribution graph generation, see [`analysis/README.md`](analysis/README.md).
+
+## Repo Structure
+
+- `models/` — Qwen2 + transcoder model class for training/inference (`qwen2_transcoder.py`) and vLLM serving (`qwen2_transcoder_vllm.py`)
+- `training/` — Training script, config system, losses, dataset loader, and experiment configs
+- `analysis/` — Feature analysis pipeline: activation collection, LLM-judge classification, auto-interp, and RelP attribution graphs
+- `demo/` — Example scripts for generation with adapters on/off (transformers and vLLM)
+- `misc_scripts/` — Dataset filtering, hybrid model creation
+
+## Citing
+
+If transcoder adapters or this repository is useful in your own research, you can use the following BibTeX entry:
+
+```
+@misc{hu2026transcoderadaptersreasoningmodeldiffing,
+  title={Transcoder Adapters for Reasoning-Model Diffing},
+  author={Nathan Hu and Jake Ward and Thomas Icard and Christopher Potts},
+  year={2026},
+  eprint={2602.20904},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG},
+  url={https://arxiv.org/abs/2602.20904},
+}
+```
