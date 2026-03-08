@@ -18,7 +18,7 @@ import wandb
 from functools import partial
 from typing import Dict
 
-from training.config import load_config, ExperimentConfig, BridgingConfig, DirectConfig, _finalize_config
+from training.config import load_config, ExperimentConfig, BridgingConfig, _finalize_config
 from training.dataset import OpenThoughtsDataset, collate_fn
 from training.forward_utils import forward_mixed, sample_cutoffs
 from training.losses import compute_kl_loss, compute_lm_loss, compute_nmse_loss
@@ -140,99 +140,49 @@ def setup_models_bridging(config: ExperimentConfig):
         param.requires_grad = False
     print(f"Reference model loaded and frozen")
 
+    # Copy config values from target model so vLLM behaves correctly at eval time
+    model.config.max_position_embeddings = ref_model.config.max_position_embeddings
+    model.config.eos_token_id = ref_model.config.eos_token_id
+
     return model, ref_model, tokenizer
 
 
-def setup_models_direct(config: ExperimentConfig):
-    """Load base model with transcoders for direct fine-tuning (no reference model).
 
-    Adds special tokens (e.g. <think>, </think>) to the base tokenizer and copies
-    their embeddings from the reference model so they have meaningful representations
-    despite being frozen.
-    """
-    direct_config = config.direct
-    tc_config = config.transcoder
-
-    # Load base model tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        config.model_name, trust_remote_code=True, use_fast=True,
-    )
+def setup_models_resume(config: ExperimentConfig, resume_from: str):
+    """Load model and tokenizer from a checkpoint for resuming training."""
+    tokenizer = AutoTokenizer.from_pretrained(resume_from, trust_remote_code=True, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Add special tokens that the base tokenizer doesn't have
-    if direct_config.copied_tokens:
-        num_added = tokenizer.add_special_tokens({
-            "additional_special_tokens": direct_config.copied_tokens,
-        })
-        print(f"Added {num_added} special tokens: {direct_config.copied_tokens}")
-
-    # Load base model with transcoders
-    hf_config = Qwen2ConfigWithTranscoder.from_pretrained(
-        config.model_name,
-        transcoder_n_features=tc_config.n_features,
-        transcoder_dec_bias=tc_config.dec_bias,
-    )
-    print(f"Loading base model: {config.model_name}")
+    print(f"Resuming model from: {resume_from}")
     model = Qwen2ForCausalLMWithTranscoder.from_pretrained(
-        config.model_name,
-        config=hf_config,
+        resume_from,
         torch_dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
 
-    # Resize embeddings for newly added tokens
-    if direct_config.copied_tokens:
-        model.resize_token_embeddings(len(tokenizer))
-
-        # Copy embeddings from reference model for the new tokens
-        print(f"Copying token embeddings from: {direct_config.reference_model_path}")
-        ref_model = AutoModelForCausalLM.from_pretrained(
-            direct_config.reference_model_path,
-            torch_dtype=torch.bfloat16,
-            device_map="cpu",
-            trust_remote_code=True,
-        )
-        ref_tokenizer = AutoTokenizer.from_pretrained(
-            direct_config.reference_model_path, trust_remote_code=True,
-        )
-
-        for token_str in direct_config.copied_tokens:
-            # Get token ID in each tokenizer
-            new_id = tokenizer.convert_tokens_to_ids(token_str)
-            ref_id = ref_tokenizer.convert_tokens_to_ids(token_str)
-            if ref_id == ref_tokenizer.unk_token_id:
-                print(f"  WARNING: '{token_str}' not found in reference tokenizer, skipping")
-                continue
-
-            # Copy embed_tokens
-            embed_device = model.model.embed_tokens.weight.device
-            model.model.embed_tokens.weight.data[new_id] = (
-                ref_model.model.embed_tokens.weight.data[ref_id].to(embed_device)
-            )
-            # Copy lm_head
-            head_device = model.lm_head.weight.device
-            model.lm_head.weight.data[new_id] = (
-                ref_model.lm_head.weight.data[ref_id].to(head_device)
-            )
-            print(f"  Copied '{token_str}': ref[{ref_id}] -> base[{new_id}]")
-
-        del ref_model, ref_tokenizer
-        print("Token embeddings copied")
-
-    # Re-initialize transcoder weights (same reason as bridging)
-    for layer in model.model.layers:
-        layer.mlp._init_transcoder_weights()
-
     # Freeze everything except transcoder parameters
     for name, param in model.named_parameters():
         param.requires_grad = "transcoder" in name
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    n_frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f"Trainable: {n_trainable:,} params, Frozen: {n_frozen:,} params")
+    print(f"Trainable: {n_trainable:,} params")
 
-    return model, None, tokenizer
+    # Load reference model if bridging mode
+    ref_model = None
+    if config.bridging:
+        print(f"Loading reference model: {config.bridging.reference_model_path}")
+        ref_model = AutoModelForCausalLM.from_pretrained(
+            config.bridging.reference_model_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        ref_model.eval()
+        for param in ref_model.parameters():
+            param.requires_grad = False
+
+    return model, ref_model, tokenizer
 
 
 def setup_data(config: ExperimentConfig, tokenizer):
@@ -282,7 +232,7 @@ def setup_data(config: ExperimentConfig, tokenizer):
             num_workers=0
         )
 
-    return train_dataset, train_dataloader, val_dataloader
+    return train_dataset, train_dataloader, val_dataloader, generator
 
 
 def setup_training(config: ExperimentConfig, model, dataset):
@@ -307,39 +257,6 @@ def setup_training(config: ExperimentConfig, model, dataset):
 
     return optimizer, scheduler, total_steps, warmup_steps
 
-
-def train_step_direct(
-    model,
-    batch: Dict,
-    config: ExperimentConfig,
-    gradient_accumulation_steps: int,
-) -> Dict[str, float]:
-    """Single training step for direct fine-tuning (LM loss + sparsity only)."""
-    input_ids = batch["input_ids"]
-    attention_mask = batch["attention_mask"]
-    labels = batch["labels"]
-    l1_weight = config.transcoder.l1_weight or 0.0
-
-    # Forward pass with feature caching (for L1 loss + stats)
-    model.set_cache_features(True)
-    logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
-    model.set_cache_features(False)
-
-    # Losses
-    lm_loss = compute_lm_loss(logits, labels)
-    raw_sparsity = model.collect_sparsity_loss()
-    weighted_sparsity = l1_weight * raw_sparsity
-
-    # Backward
-    total_loss = (lm_loss + weighted_sparsity) / gradient_accumulation_steps
-    total_loss.backward()
-
-    metrics = {
-        "train/lm_loss": lm_loss.item(),
-        "train/sparsity": raw_sparsity.item(),
-        "train/total_loss": lm_loss.item() + weighted_sparsity.item(),
-    }
-    return metrics
 
 
 def train_step_bridging(
@@ -503,6 +420,8 @@ def train_epoch(
     total_steps: int,
     total_samples_seen: int,
     val_dataloader=None,
+    skip_batches: int = 0,
+    dl_generator=None,
 ):
     """Train for one epoch."""
     model.train()
@@ -516,22 +435,30 @@ def train_epoch(
     gradient_accumulation_steps = config.batch_size // config.micro_batch_size
 
     embed_device = model.get_input_embeddings().weight.device
-    epoch_pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
+
+    # Capture generator state BEFORE iter() consumes it for shuffling.
+    # This is saved in checkpoints so resume can reproduce this epoch's shuffle order.
+    epoch_rng_state = dl_generator.get_state().clone() if dl_generator is not None else None
+
+    dataloader_iter = iter(dataloader)
+    if skip_batches > 0:
+        print(f"  Skipping {skip_batches} batches to resume position...")
+        for _ in tqdm(range(skip_batches), desc="Skipping batches"):
+            next(dataloader_iter)
+        print(f"  Done, resuming training")
+
+    remaining = len(dataloader) - skip_batches
+    epoch_pbar = tqdm(dataloader_iter, total=remaining, desc=f"Epoch {epoch+1}/{config.num_epochs}")
 
     for step, batch in enumerate(epoch_pbar):
         batch = move_batch_to(embed_device, batch)
 
         # Forward + backward (handled inside train_step for memory efficiency)
-        if config.direct:
-            step_metrics = train_step_direct(
-                model, batch, config, gradient_accumulation_steps
-            )
-        else:
-            step_metrics = train_step_bridging(
-                model, ref_model, batch, config,
-                global_step, total_steps,
-                gradient_accumulation_steps
-            )
+        step_metrics = train_step_bridging(
+            model, ref_model, batch, config,
+            global_step, total_steps,
+            gradient_accumulation_steps
+        )
 
         accumulation_step += 1
         current_batch_losses.append(step_metrics.get("train/total_loss", 0.0))
@@ -602,23 +529,16 @@ def train_epoch(
 
             # Run validation
             if val_dataloader is not None and global_step % config.val_frequency == 0:
-                if config.direct:
-                    val_metrics = validate_direct(model, val_dataloader, config)
-                    val_metrics["val/epoch"] = epoch
-                    val_metrics["val/step"] = global_step
-                    val_metrics["val/samples_seen"] = samples_seen
-                    print(f"  Val LM: {val_metrics['val/lm_loss']:.4f}")
-                else:
-                    val_metrics = validate_bridging(model, ref_model, val_dataloader, config)
-                    val_metrics["val/epoch"] = epoch
-                    val_metrics["val/step"] = global_step
-                    val_metrics["val/samples_seen"] = samples_seen
-                    print(f"  Val total: {val_metrics['val/total_loss']:.4f}, LM: {val_metrics['val/language_modeling_loss']:.4f}, KL: {val_metrics['val/kl_to_ref']:.4f}")
+                val_metrics = validate_bridging(model, ref_model, val_dataloader, config)
+                val_metrics["val/epoch"] = epoch
+                val_metrics["val/step"] = global_step
+                val_metrics["val/samples_seen"] = samples_seen
+                print(f"  Val total: {val_metrics['val/total_loss']:.4f}, LM: {val_metrics['val/language_modeling_loss']:.4f}, KL: {val_metrics['val/kl_to_ref']:.4f}")
                 if config.use_wandb:
                     wandb.log(val_metrics, step=global_step)
 
-            # Run comprehensive layerwise validation (bridging only)
-            if config.bridging and val_dataloader is not None and global_step % config.layerwise_val_frequency == 0:
+            # Run comprehensive layerwise validation
+            if val_dataloader is not None and global_step % config.layerwise_val_frequency == 0:
                 print(f"  Running layerwise validation...")
                 layerwise_metrics = validate_layerwise(model, ref_model, val_dataloader, config)
                 if config.use_wandb:
@@ -627,7 +547,16 @@ def train_epoch(
             # Save periodic checkpoint (overwrites previous latest)
             if config.save_checkpoints and global_step > 0 and global_step % config.checkpoint_frequency == 0:
                 print(f"  Saving checkpoint at step {global_step}...")
-                save_latest_checkpoint(model, tokenizer, config.output_dir, global_step)
+                training_state = {
+                    'step': global_step,
+                    'epoch': epoch,
+                    'samples_seen': samples_seen,
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                    'dataloader_rng': epoch_rng_state,
+                }
+                save_latest_checkpoint(model, tokenizer, config.output_dir, global_step,
+                                       training_state=training_state)
 
             # Debug mode early exit
             if config.debug_mode and global_step >= 50:
@@ -639,39 +568,6 @@ def train_epoch(
     avg_epoch_loss = sum(batch_losses) / len(batch_losses) if batch_losses else 0.0
     return avg_epoch_loss, global_step, samples_seen
 
-
-@torch.no_grad()
-def validate_direct(
-    model,
-    val_dataloader,
-    config: ExperimentConfig,
-    max_samples: int = 100,
-) -> Dict[str, float]:
-    """Run validation for direct fine-tuning (LM loss + sparsity)."""
-    model.eval()
-    total_lm_loss = 0.0
-    total_sparsity = 0.0
-    num_samples = 0
-    embed_device = model.get_input_embeddings().weight.device
-
-    for batch in val_dataloader:
-        if num_samples >= max_samples:
-            break
-        batch = move_batch_to(embed_device, batch)
-        model.set_cache_features(True)
-        logits = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
-        model.set_cache_features(False)
-        total_sparsity += model.collect_sparsity_loss().item()
-        model.clear_cached_stats()
-        total_lm_loss += compute_lm_loss(logits, batch["labels"]).item()
-        num_samples += 1
-        del batch
-
-    model.train()
-    return {
-        "val/lm_loss": total_lm_loss / num_samples if num_samples > 0 else 0.0,
-        "val/sparsity": total_sparsity / num_samples if num_samples > 0 else 0.0,
-    }
 
 
 @torch.no_grad()
@@ -820,15 +716,19 @@ def save_checkpoint(model, tokenizer, output_dir):
     print(f"Checkpoint saved to {output_dir}")
 
 
-def save_latest_checkpoint(model, tokenizer, base_dir, step):
+def save_latest_checkpoint(model, tokenizer, base_dir, step, training_state=None):
     """Save checkpoint to base_dir/latest_step_N, removing any previous latest_step_* dir."""
     import glob
     import shutil
-    # Remove previous latest checkpoint
-    for old_dir in glob.glob(os.path.join(base_dir, "latest_step_*")):
-        shutil.rmtree(old_dir)
     output_dir = os.path.join(base_dir, f"latest_step_{step}")
     save_checkpoint(model, tokenizer, output_dir)
+    if training_state is not None:
+        torch.save(training_state, os.path.join(output_dir, "training_state.pt"))
+        print(f"  Training state saved (step={step})")
+    # Delete old checkpoints after new one is fully written
+    for old_dir in glob.glob(os.path.join(base_dir, "latest_step_*")):
+        if old_dir != output_dir:
+            shutil.rmtree(old_dir)
 
 
 def main():
@@ -836,16 +736,14 @@ def main():
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--learning_rate", "-lr", type=float, help="Override learning rate")
     parser.add_argument("--l1_weight", type=float, help="Override L1 weight")
+    parser.add_argument("--resume_from", type=str, help="Path to checkpoint directory to resume from")
     args = parser.parse_args()
 
     # Load config
     config = load_config(args.config)
 
-    # Validate exactly one training mode is set
-    has_bridging = config.bridging is not None
-    has_direct = config.direct is not None
-    if has_bridging == has_direct:
-        raise ValueError("Config must specify exactly one of 'bridging' or 'direct' section.")
+    if config.bridging is None:
+        raise ValueError("Config must specify a 'bridging' section.")
 
     # Apply overrides
     config_changed = False
@@ -868,33 +766,55 @@ def main():
         print(f"Updated run name: {config.wandb_run_name}")
         print(f"Updated output dir: {config.output_dir}")
 
-    # Print mode-specific info
-    if config.direct:
-        print(f"Starting direct fine-tuning")
-        print(f"  Base model: {config.model_name}")
-        print(f"  Copied tokens: {config.direct.copied_tokens}")
-    else:
-        print(f"Starting bridging training")
-        print(f"  Base model: {config.model_name}")
-        print(f"  Reference model: {config.bridging.reference_model_path}")
-        print(f"  Loss type: {config.bridging.loss_type}")
-        print(f"  N cutoffs: {config.bridging.n_cutoffs}")
+    print(f"Starting bridging training")
+    print(f"  Base model: {config.model_name}")
+    print(f"  Reference model: {config.bridging.reference_model_path}")
+    print(f"  Loss type: {config.bridging.loss_type}")
+    print(f"  N cutoffs: {config.bridging.n_cutoffs}")
 
     # Setup models
-    if config.direct:
-        model, ref_model, tokenizer = setup_models_direct(config)
+    if args.resume_from:
+        model, ref_model, tokenizer = setup_models_resume(config, args.resume_from)
     else:
         model, ref_model, tokenizer = setup_models_bridging(config)
 
-    train_dataset, train_dataloader, val_dataloader = setup_data(config, tokenizer)
+    train_dataset, train_dataloader, val_dataloader, dl_generator = setup_data(config, tokenizer)
     optimizer, scheduler, total_steps, warmup_steps = setup_training(config, model, train_dataset)
+
+    # Resume: restore optimizer and scheduler from checkpoint
+    resume_step = 0
+    resume_epoch = 0
+    resume_samples = 0
+    if args.resume_from:
+        state_path = os.path.join(args.resume_from, "training_state.pt")
+        if not os.path.exists(state_path):
+            raise FileNotFoundError(
+                f"No training_state.pt found in {args.resume_from}. "
+                "Cannot resume without saved training state."
+            )
+        print(f"Loading training state from: {state_path}")
+        training_state = torch.load(state_path, map_location="cpu", weights_only=True)
+        optimizer.load_state_dict(training_state['optimizer'])
+        # Move optimizer states to match parameter devices (handles different GPU layouts)
+        for param_group in optimizer.param_groups:
+            for param in param_group['params']:
+                state = optimizer.state[param]
+                for k, v in state.items():
+                    if torch.is_tensor(v):
+                        state[k] = v.to(param.device)
+        scheduler.load_state_dict(training_state['scheduler'])
+        resume_step = training_state['step']
+        resume_epoch = training_state['epoch']
+        resume_samples = training_state['samples_seen']
+        if 'dataloader_rng' in training_state:
+            dl_generator.set_state(training_state['dataloader_rng'])
+        print(f"  Resumed from step={resume_step}, epoch={resume_epoch}, samples={resume_samples}")
 
     # WandB
     if config.use_wandb:
-        mode_prefix = "direct" if config.direct else "bridging"
         wandb.init(
             project=config.wandb_project,
-            name=f"{mode_prefix}_{config.wandb_run_name}",
+            name=f"bridging_{config.wandb_run_name}",
             config=config.__dict__
         )
 
@@ -902,22 +822,43 @@ def main():
     print(f"  - Train dataset size: {len(train_dataset)}")
     print(f"  - Total steps: {total_steps}")
     print(f"  - Warmup steps: {warmup_steps}")
+    if args.resume_from:
+        print(f"  - Resuming from step: {resume_step}")
 
     # Training loop
-    current_step = 0
-    total_samples_seen = 0
+    current_step = resume_step
+    total_samples_seen = resume_samples
+    steps_per_epoch = len(train_dataset) // config.batch_size
+    grad_accum = config.batch_size // config.micro_batch_size
 
-    for epoch in range(config.num_epochs):
+    for epoch in range(resume_epoch, config.num_epochs):
+        # On the resume epoch, skip batches we already trained on
+        skip = 0
+        if epoch == resume_epoch and resume_step > 0:
+            steps_into_epoch = resume_step - resume_epoch * steps_per_epoch
+            skip = steps_into_epoch * grad_accum
+
         epoch_loss, current_step, total_samples_seen = train_epoch(
             model, ref_model, tokenizer, train_dataloader, optimizer, scheduler,
             config,
             epoch, current_step, total_steps, total_samples_seen,
             val_dataloader=val_dataloader,
+            skip_batches=skip,
+            dl_generator=dl_generator,
         )
 
         # Save checkpoint at end of epoch (overwrites previous latest)
         if config.save_checkpoints:
-            save_latest_checkpoint(model, tokenizer, config.output_dir, current_step)
+            training_state = {
+                'step': current_step,
+                'epoch': epoch + 1,
+                'samples_seen': total_samples_seen,
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'dataloader_rng': dl_generator.get_state(),
+            }
+            save_latest_checkpoint(model, tokenizer, config.output_dir, current_step,
+                                   training_state=training_state)
 
     print("Training complete!")
 

@@ -31,12 +31,6 @@ class BridgingConfig:
     backbone: str = "target"  # "base" or "target" (which model provides attn/embed/layernorm)
 
 
-@dataclass
-class DirectConfig:
-    """Direct fine-tuning configuration (no bridging, LM loss only on response tokens)."""
-    reference_model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"  # Source for copied token embeddings
-    copied_tokens: List[str] = field(default_factory=lambda: ["<think>", "</think>"])  # Tokens to add and copy from reference
-
 
 @dataclass
 class ExperimentConfig:
@@ -48,9 +42,8 @@ class ExperimentConfig:
     # Transcoder configuration
     transcoder: Optional[TranscoderConfig] = None
 
-    # Training mode (exactly one of bridging or direct must be set)
+    # Training mode
     bridging: Optional[BridgingConfig] = None
-    direct: Optional[DirectConfig] = None
 
     # Training hyperparameters
     learning_rate: float = 8e-4
@@ -105,9 +98,6 @@ def load_config(config_path: str) -> ExperimentConfig:
         adapter_configs['transcoder'] = TranscoderConfig(**config_dict.pop('transcoder'))
     if 'bridging' in config_dict:
         adapter_configs['bridging'] = BridgingConfig(**config_dict.pop('bridging'))
-    if 'direct' in config_dict:
-        adapter_configs['direct'] = DirectConfig(**config_dict.pop('direct'))
-
     # Create main config with adapter configs
     config = ExperimentConfig(**config_dict, **adapter_configs)
 
@@ -162,9 +152,6 @@ def _finalize_config(config: ExperimentConfig) -> ExperimentConfig:
             run_parts.append(f"{backbone[:3]}bb")  # "basbb" or "tgtbb"
             run_parts.append(f"lb{config.bridging.lambda_bridge}")
             run_parts.append(f"ln{config.bridging.lambda_nmse}")
-        elif config.direct:
-            run_parts.append("direct")
-
         # Add training params
         run_parts.append(f"lr{config.learning_rate:.0e}")
         run_parts.append(f"bs{config.batch_size}")
@@ -204,8 +191,6 @@ def apply_overrides(config: ExperimentConfig, overrides: Dict[str, Any]) -> Expe
                 setattr(config.transcoder, param, value)
             elif section == 'bridging' and config.bridging:
                 setattr(config.bridging, param, value)
-            elif section == 'direct' and config.direct:
-                setattr(config.direct, param, value)
             else:
                 raise ValueError(f"Invalid override section: {section}")
         else:
