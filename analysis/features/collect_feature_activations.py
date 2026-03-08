@@ -637,8 +637,8 @@ def main():
                         help="Output directory for feature JSONs and metadata")
 
     # Optional args
-    parser.add_argument("--tokenizer", type=str, default="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-                        help="Tokenizer name/path")
+    parser.add_argument("--tokenizer", type=str, default=None,
+                        help="Tokenizer name/path (default: load from model_path)")
     parser.add_argument("--max_samples", type=int, default=None,
                         help="Max samples to process (default: all)")
     parser.add_argument("--top_k", type=int, default=20,
@@ -649,6 +649,8 @@ def main():
                         help="Context tokens before activating token")
     parser.add_argument("--context_after", type=int, default=20,
                         help="Context tokens after activating token")
+    parser.add_argument("--data_format", type=str, default="deepseek",
+                        help="Dataset format (deepseek or qwen)")
     parser.add_argument("--max_length", type=int, default=10000,
                         help="Max sequence length (longer sequences truncated)")
 
@@ -659,8 +661,9 @@ def main():
     print(f"Output directory: {output_dir}")
 
     # Load tokenizer
-    print(f"Loading tokenizer: {args.tokenizer}")
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
+    tokenizer_path = args.tokenizer or args.model_path
+    print(f"Loading tokenizer: {tokenizer_path}")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
     # Load model
     print(f"Loading model: {args.model_path}")
@@ -681,7 +684,7 @@ def main():
         data_path=args.val_data,
         tokenizer=tokenizer,
         max_length=args.max_length,
-        format="deepseek",
+        format=args.data_format,
         truncate=True,
         loss_on_prompt=False,
     )
