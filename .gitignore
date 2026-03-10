@@ -3,3 +3,6 @@ __pycache__/
 *.egg-info/
 .venv/
 .env
+commands.sh
+claude_scripts/
+TODO.md
