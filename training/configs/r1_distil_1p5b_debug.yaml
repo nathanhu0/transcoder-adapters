@@ -30,7 +30,7 @@ learning_rate: 8e-4
 num_epochs: 1
 warmup_ratio: 0.05
 
-use_wandb: false
+use_wandb: true
 debug_mode: false
 save_checkpoints: true
 checkpoint_frequency: 25

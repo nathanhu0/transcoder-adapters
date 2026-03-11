@@ -66,6 +66,7 @@ class Qwen2MLPWithTranscoder(Qwen2MLP):
         # Dead feature tracking: persistent counter per feature, never cleared.
         # Increments by batch_size each forward, resets to 0 for active features.
         self._dead_feature_counters = torch.zeros(self.n_features)
+        self._attention_mask = None  # set by parent model to mask padding
 
     def _init_transcoder_weights(self):
         """Initialize transcoder weights."""
@@ -93,17 +94,28 @@ class Qwen2MLPWithTranscoder(Qwen2MLP):
         if self.cache_features:
             batch_size = features.shape[0]
 
-            # L1: weighted by decoder column norms, sum over features, mean over (batch, seq)
+            # L1: weighted by decoder column norms, sum over features, mean over real tokens
             # Differentiable — stays in computation graph for backward
             dec_column_norms = torch.norm(self.transcoder_dec.weight, dim=0)  # [n_features]
             weighted_features = features * dec_column_norms.unsqueeze(0).unsqueeze(0)
-            self.cached_l1 = weighted_features.sum(dim=-1).mean()
+            per_token_l1 = weighted_features.sum(dim=-1)  # [batch, seq]
+
+            if self._attention_mask is not None:
+                mask = self._attention_mask.bool()  # [batch, seq]
+                self.cached_l1 = per_token_l1[mask].mean()
+            else:
+                self.cached_l1 = per_token_l1.mean()
 
             with torch.no_grad():
                 feature_active = features > 0  # [batch, seq, n_features]
 
-                # L0: count active features per token, mean over (batch, seq)
-                self.cached_l0 = feature_active.float().sum(dim=-1).mean().item()
+                # L0: count active features per token, mean over real tokens
+                per_token_l0 = feature_active.float().sum(dim=-1)  # [batch, seq]
+                if self._attention_mask is not None:
+                    mask = self._attention_mask.bool()
+                    self.cached_l0 = per_token_l0[mask].mean().item()
+                else:
+                    self.cached_l0 = per_token_l0.mean().item()
 
                 # Dead features: age all, reset active ones
                 self._dead_feature_counters = self._dead_feature_counters.to(features.device)
@@ -125,6 +137,12 @@ class Qwen2ForCausalLMWithTranscoder(Qwen2ForCausalLM):
         # Replace all MLP modules with transcoder versions
         for layer in self.model.layers:
             layer.mlp = Qwen2MLPWithTranscoder(config)
+
+    def forward(self, *args, attention_mask=None, **kwargs):
+        """Forward pass — broadcasts attention_mask to MLPs for masked stats."""
+        for layer in self.model.layers:
+            layer.mlp._attention_mask = attention_mask
+        return super().forward(*args, attention_mask=attention_mask, **kwargs)
 
     def set_cache_features(self, enabled: bool):
         """Toggle feature caching on all transcoder layers."""
@@ -169,6 +187,7 @@ class Qwen2ForCausalLMWithTranscoder(Qwen2ForCausalLM):
         for layer in self.model.layers:
             layer.mlp.cached_l1 = None
             layer.mlp.cached_l0 = None
+            layer.mlp._attention_mask = None
 
 
 def register_qwen2_transcoder():

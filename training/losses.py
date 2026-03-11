@@ -91,12 +91,21 @@ def compute_lm_loss(
     return loss
 
 
-def _layer_nmse(h_adapt: torch.Tensor, h_ref: torch.Tensor) -> torch.Tensor:
-    """Compute NMSE for a single layer's hidden states."""
+def _layer_nmse(h_adapt: torch.Tensor, h_ref: torch.Tensor,
+                mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """Compute NMSE for a single layer's hidden states, optionally masking padding."""
     # Ensure both tensors are on the same device
     h_ref = h_ref.to(h_adapt.device)
-    mse = (h_adapt - h_ref).pow(2).mean()
-    norm = h_ref.pow(2).mean()
+    if mask is not None:
+        mask_3d = mask.unsqueeze(-1).to(h_adapt.device)  # [batch, seq, 1]
+        diff = (h_adapt - h_ref) * mask_3d
+        ref_masked = h_ref * mask_3d
+        n_elements = mask_3d.sum() * h_adapt.shape[-1]
+        mse = diff.pow(2).sum() / n_elements
+        norm = ref_masked.pow(2).sum() / n_elements
+    else:
+        mse = (h_adapt - h_ref).pow(2).mean()
+        norm = h_ref.pow(2).mean()
     return mse / (norm + 1e-8)
 
 
@@ -156,7 +165,7 @@ def compute_nmse_loss(
         position_embeddings_ref = ref_model.model.rotary_emb(h_ref, position_ids)
 
     # NMSE on embeddings (layer 0)
-    layer_nmse_0 = _layer_nmse(h_adapt, h_ref.detach())
+    layer_nmse_0 = _layer_nmse(h_adapt, h_ref.detach(), mask=attention_mask)
     nmse_total = layer_nmse_0.to(device)
     layerwise = {0: layer_nmse_0.item()} if return_layerwise else None
 
@@ -182,7 +191,7 @@ def compute_nmse_loss(
             )
 
         # Accumulate NMSE (move to consistent device for multi-GPU)
-        layer_nmse_i = _layer_nmse(h_adapt, h_ref.detach())
+        layer_nmse_i = _layer_nmse(h_adapt, h_ref.detach(), mask=attention_mask)
         nmse_total = nmse_total + layer_nmse_i.to(device)
         if return_layerwise:
             layerwise[i + 1] = layer_nmse_i.item()
